@@ -7,7 +7,7 @@
   let socket, sessionId, xrSession, referenceSpace, gl, hud, worldScene, sceneAnchor;
   let sequence = 0, epoch = 0, currentStatus = null, lastDiagnostic = 0;
   let xrMode = null, ended = false, deviceOptions = '';
-  let xrCapabilities=null, renderedFrames=0, xrLifecycle=null, pageDeparted=false;
+  let xrCapabilities=null, renderedFrames=0, xrLifecycle=null, pageDeparted=false,xrContextKey=null,xrInspectionGeneration=0;
   let softwareUiConfigured=false;
   const deviceReport=extra=>({userAgent:navigator.userAgent,control_scheme:'right_only',scene_version:'spatial-v3-servo',
     ...(xrCapabilities?{capabilities:xrCapabilities}:{}),...extra});
@@ -72,7 +72,7 @@
         // time inside the server-measured RTT, widening the offset interval.
         send({type:'clock_reply',id:m.id,client_recv_ms:received,client_send_ms:received});
       } else if (m.type === 'status') {
-        currentStatus=m;renderStatus(m);
+        currentStatus=m;renderStatus(m);inspectXR();
       } else if (m.type === 'error') {
         event(m.message);$('reason').textContent=m.message;
         if(hardwarePanel && hardwarePanel.isImportPending())hardwarePanel.failImport(m.message);
@@ -136,6 +136,7 @@
     }
     $('state').textContent=PicoInput.stateLabel(s.state);$('reason').textContent=s.reason;
     $('backend-badge').textContent=s.hardware?(s.hardware.is_virtual?'虚拟舵机 · 软件验证':s.hardware.ready?'真机 · 已接管':s.hardware.calibrated?'真机 · 反馈只读':'真机 · 未标定参考模型'):s.motor?'舵机响应仿真 · 未标定':'仅运动学仿真 · 未接真实电机';
+    if(!s.hardware)document.querySelector('.subtitle').textContent='仿真模式：在 PICO 内进入 VR 仿真预览，用右手柄操控虚拟 SO101；不会连接真实电机。';
     if(s.hardware){
       $('arm').textContent=s.hardware.is_virtual?'授权虚拟跟随':'授权真机跟随';
       if(role==='monitor'){
@@ -212,9 +213,18 @@
 
   async function inspectXR() {
     if (role!=='input') {
-      $('enter-ar').hidden=true;$('enter-vr').hidden=true;$('xr-help').textContent='头显网页打开后点击「进入透视遥操作」，通过头显看真实机械臂；电脑查看反馈与连接。VR 入口仅供仿真预览。';
+      const hardware=currentStatus && currentStatus.hardware;
+      const realArm=!!(hardware && !hardware.is_virtual);
+      $('enter-ar').hidden=true;$('enter-vr').hidden=true;$('xr-help').textContent=realArm?
+        '头显页面点击「进入透视遥操作」，通过透视看真实机械臂；电脑查看反馈与连接。':
+        '在头显页面点击「VR 仿真预览」，进入虚拟场景后用右手柄操作；电脑查看连接与关节反馈。';
       $('compatibility').textContent='等待 PICO 端回报浏览器、控制器 profile 和按钮数据。';return;
     }
+    const hardware=currentStatus && currentStatus.hardware;
+    const realArm=!!(hardware && !hardware.is_virtual);
+    const key=`${currentStatus && currentStatus.backend || 'pending'}:${realArm?'real':'simulation'}`;
+    if(key===xrContextKey)return;
+    xrContextKey=key;const generation=++xrInspectionGeneration;
     if (!window.isSecureContext || !navigator.xr) {
       $('enter-vr').textContent='WebXR 不可用';$('xr-help').textContent='请使用 PICO 浏览器，并通过 USB localhost 地址访问。';
       $('compatibility').textContent=`安全上下文：${window.isSecureContext}；navigator.xr：${!!navigator.xr}`;return;
@@ -223,10 +233,14 @@
       const vr=await navigator.xr.isSessionSupported('immersive-vr');
       let ar=false;
       try{ar=await navigator.xr.isSessionSupported('immersive-ar');}catch{/* Optional AR must not block VR. */}
-      $('enter-ar').hidden=false;$('enter-ar').disabled=!ar;$('enter-ar').textContent=ar?'进入透视遥操作':'当前浏览器未提供 AR 透视';
-      $('enter-vr').hidden=false;$('enter-vr').disabled=!vr;$('enter-vr').textContent=vr?'VR 仿真预览':'浏览器不支持沉浸式 VR';
+      if(generation!==xrInspectionGeneration)return;
+      $('enter-ar').classList.toggle('primary',realArm);$('enter-vr').classList.toggle('primary',!realArm);
+      $('enter-ar').hidden=!realArm;$('enter-ar').disabled=!ar;$('enter-ar').textContent=ar?'进入透视遥操作':'当前浏览器未提供 AR 透视';
+      $('enter-vr').hidden=realArm;$('enter-vr').disabled=!vr;$('enter-vr').textContent=vr?'VR 仿真预览':'浏览器不支持沉浸式 VR';
       $('compatibility').textContent=`VR：${vr?'支持':'不支持'}；AR 会话：${ar?'支持，透视需进入后检测':'不支持'}。VR 显示虚拟场景；AR 应看到头显周围实景，不是机器人相机回传。`;
-      $('xr-help').textContent=ar?'请进入透视遥操作，先确认能看到眼前桌面与真实机械臂。仅叠加操作提示，不显示虚拟机械臂；松开握持键和扳机，短按 A 授权。':'当前网页不能提供实景透视，需要适配 PICO 原生透视客户端。VR 只能做仿真预览，不能满足看见实物的要求。';
+      $('xr-help').textContent=realArm?
+        (ar?'真机模式：点击「进入透视遥操作」，确认看到真实机械臂后再授权。':'当前浏览器不支持真机所需的透视模式。'):
+        (vr?'仿真模式：点击「VR 仿真预览」进入虚拟场景，等待右手柄追踪有效后按 A 授权。不会连接或移动真机械臂。':'浏览器不支持 VR 仿真。');
       xrCapabilities={vr,ar};send({type:'diagnostic',details:deviceReport({})});
       syncXRButtons();
     } catch (e) {event('WebXR 检查失败：'+e.message);}

@@ -156,14 +156,14 @@ def main():
         port=8445 if args.virtual_hardware and args.port==8443 else 8444 if args.real and args.port==8443 else args.port
         result=launch(port=port,open_browser=not args.no_browser,viewer=args.viewer,no_log=args.no_log,real=args.real,virtual_hardware=args.virtual_hardware)
         if sys.stdout:print(result["desktop_url"])
-    except Exception:
+    except Exception as exc:
         import traceback
         out=ROOT/"artifacts/pico-teleop";out.mkdir(parents=True,exist_ok=True)
         log=out/"launcher.log";log.write_text(traceback.format_exc(),encoding="utf-8")
         if sys.stderr:traceback.print_exc()
         if os.name=="nt" and sys.stderr is None:
             import ctypes
-            ctypes.windll.user32.MessageBoxW(0,f"启动失败。错误已保存到：\n{log}","PICO 调试",0x10)
+            ctypes.windll.user32.MessageBoxW(0,f"启动失败：{exc}\n\n完整日志：{log}","PICO 调试",0x10)
         return 1
     return 0
 

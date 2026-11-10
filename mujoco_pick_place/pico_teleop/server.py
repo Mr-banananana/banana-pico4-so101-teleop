@@ -411,7 +411,9 @@ class TeleopService:
             elif valid:
                 info["message"]="只需右手柄：松开 A、握持键与扳机，再短按右 A 授权；握住 grip 移动。"
             else:
-                info["message"]="请在头显页面点击「进入透视遥操作」，先确认看得见真实机械臂，再检查右手柄追踪；VR 入口仅供仿真预览。"
+                info["message"]=("仿真模式：在头显页面点击「VR 仿真预览」，进入虚拟场景后检查右手柄追踪。"
+                                  if not self.controller.require_passthrough else
+                                  "真机模式：点击「进入透视遥操作」，确认看得见真实机械臂后再检查右手柄追踪。")
             if valid and self.controller.latest.emulated:
                 info['message']+=' 当前使用浏览器估算位姿，仅允许仿真，真实机械臂禁用。'
         info["self_test_busy"]=self.self_test_busy

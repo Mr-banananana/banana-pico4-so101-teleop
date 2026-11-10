@@ -70,7 +70,7 @@ def discover_motor_bus(ports=None):
             report=inspect_motors(Packet(port))
             ids=report.get('responding_ids',[])
             if not report.get('feedback_complete') or ids!=[1,2,3,4,5,6]:
-                failures.append(f'{board.device} 未读到完整 ID1～6');continue
+                failures.append(f'{board.device} 未读到完整 ID1～6（回应：{ids or "无"}）');continue
             registers=[motor['registers'] for motor in report['motors']]
             required=('model','operating_mode','homing_offset','min_position','max_position')
             if any(any(not regs.get(name,{}).get('valid') for name in required) for regs in registers):
