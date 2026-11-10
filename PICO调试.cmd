@@ -1,12 +1,15 @@
 @echo off
+setlocal
 cd /d "%~dp0"
-if exist ".venv\Scripts\pythonw.exe" (
-    start "" ".venv\Scripts\pythonw.exe" -m scripts.pico_debug
-    exit /b
+call "%~dp0scripts\prepare_pico_env.cmd"
+if errorlevel 1 (
+  pause
+  exit /b 1
 )
-if exist ".venv\Scripts\python.exe" (
-    ".venv\Scripts\python.exe" -m scripts.pico_debug
-    exit /b
+if not exist "%~dp0.venv-so101-hardware\Scripts\pythonw.exe" (
+  echo Python window launcher is missing. Reinstall Python 3.12 and try again.
+  pause
+  exit /b 1
 )
-echo Missing .venv. Install requirements-pico-teleop.txt in a Python 3.12 virtual environment.
-pause
+start "" "%~dp0.venv-so101-hardware\Scripts\pythonw.exe" -m scripts.pico_debug
+exit /b 0

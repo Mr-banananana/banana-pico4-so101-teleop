@@ -1,10 +1,16 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-set "PICO_MOTION_PROFILE=agile_fast"
-if exist ".venv-so101-hardware\Scripts\pythonw.exe" (
-    start "" ".venv-so101-hardware\Scripts\pythonw.exe" -m scripts.pico_debug --real
-    exit /b
+call "%~dp0scripts\prepare_pico_env.cmd"
+if errorlevel 1 (
+  pause
+  exit /b 1
 )
-echo Missing .venv-so101-hardware environment.
-pause
+if not exist "%~dp0.venv-so101-hardware\Scripts\pythonw.exe" (
+  echo Python window launcher is missing. Reinstall Python 3.12 and try again.
+  pause
+  exit /b 1
+)
+set "PICO_MOTION_PROFILE=agile_fast"
+start "" "%~dp0.venv-so101-hardware\Scripts\pythonw.exe" -m scripts.pico_debug --real
+exit /b 0
