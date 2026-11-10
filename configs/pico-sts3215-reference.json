@@ -1,0 +1,20 @@
+{
+  "name": "STS3215-C001 simulation reference (uncalibrated)",
+  "specification_source": "https://files.seeedstudio.com/products/Feetech/108090023_STS3215-C001_Datasheet.pdf",
+  "assembly_source": "https://huggingface.co/docs/lerobot/so101",
+  "hardware_confirmation": "Simulation reference only. Confirm the installed motor and supply independently; this is not a real-arm calibration.",
+  "datasheet_reference": {
+    "gear_ratio": 345,
+    "encoder_steps": 4096,
+    "reference_voltage": 6.0,
+    "no_load_seconds_60_deg": 0.238
+  },
+  "response_assumptions": {
+    "velocity_rad_s": [1.5, 1.0, 1.2, 1.5, 1.8, 1.5],
+    "acceleration_rad_s2": [5.0, 3.0, 4.0, 5.0, 6.0, 5.0],
+    "position_gain": 10.0,
+    "command_delay_s": 0.02,
+    "feedback_delay_s": 0.02
+  },
+  "assumption_note": "Velocity, acceleration, position gain and delays are uncalibrated engineering assumptions, not loaded motor ratings. The simulation does not model gravity, load torque, voltage variation, friction, backlash, current, heating or overload protection."
+}

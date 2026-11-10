@@ -1,0 +1,12 @@
+configs/pico-hardware.local.json
+configs/pico-real-calibration.local.json
+configs/pico-control-reference.local.json
+configs/pico-client.local.json
+artifacts/
+.venv/
+.venv*/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.env
+.env.*

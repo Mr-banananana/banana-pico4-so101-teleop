@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PICO 4 · SO101 遥操作台</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main>
+    <header><div><p class="eyebrow">PICO 4 × SO-ARM101</p><h1>遥操作实验台</h1>
+      <p class="subtitle">通过 PICO 本机透视观察眼前真实机械臂，用右手柄遥操作。</p></div>
+      <span id="backend-badge" class="badge">仿真模式 · 未接真实电机</span></header>
+    <div id="session-warning" class="notice" hidden>缺少本次会话连接信息。请从启动程序输出的完整地址打开此页。</div>
+    <section id="hardware-panel" class="panel" hidden>
+      <div class="panel-heading"><h2 id="hardware-heading">真机接管向导</h2><strong id="hardware-state">正在读取电机</strong></div>
+      <p id="hardware-message" class="reason"></p>
+      <p id="calibration-summary" class="hint">正在检查已保存的标定。标定用于把电机读数换算成模型关节角度。</p>
+      <ol id="handover-steps" class="instructions"><li id="handover-feedback">检查六路电机反馈和已保存的标定。</li><li>确认实物姿态与模型一致，并勾选下方工位确认；点击「按当前姿态接管电机」。</li><li>戴上头显进入透视遥操作，确认能看见真实机械臂；松开握持键和扳机，短按右 A 授权。</li><li>按住握持键移动右手；松开保持，右 B 停止。</li></ol>
+      <div id="software-guide" hidden><p class="hint">完整遥操作软件链路使用内存中的虚拟舵机；不会打开串口、启动 ADB 或移动真实机械臂。</p><div class="controls"><button id="virtual-demo" class="primary">运行虚拟手柄演示</button></div><p id="software-result" role="status">等待软件验证</p></div>
+      <p id="workcell-confirmation"><label><input id="cal-workcell" type="checkbox"> 我已核对模型与实物姿态一致；机械臂已固定、空载，工作区已清空</label></p>
+      <details id="passive-calibration"><summary id="calibration-title">高级：重新手动标定（已有有效文件时无需操作）</summary>
+      <p class="notice">这是首次安装或更换电机后的设置工具，不是每次遥操作前的操作。记录新零位会使当前映射失效，需要重新采集并保存完整标定。已有有效文件时保持此项折叠。</p>
+      <p class="hint">零位决定角度起点；活动范围决定允许转动的边界；正反向决定模型与实物是否同向；夹爪端点决定开合量。它们与头显重新授权是两件事。</p>
+      <p class="hint">标定阶段保持各轴卸力并托住肩肘。先看下方零位参考或完整 CAD：对齐每个关节和夹爪朝向，再记录零位。这里显示的参考模型不是当前实测姿态。</p>
+      <div class="controls"><button id="cal-reference">显示零位参考</button><button id="cal-zero">已对齐模型，记录零位</button><button id="cal-range">开始记录安全活动范围</button><button id="cal-closed">记录夹爪闭合端</button><button id="cal-open">记录夹爪打开端</button></div>
+      <p class="hint">记录范围时，手动逐轴缓慢活动到日常使用的舒适边界，再回到中间；不用撞到机械止挡。方向选择改变后，下方模型显示未标定的实时映射预览，逐轴与实物核对。夹爪开合端要单独记录。</p>
+      <div id="cal-signs" class="controls"></div>
+      <div class="controls"><label>电机供电版本 <select id="cal-supply"><option value="">请核对标签</option><option value="12V">12V</option><option value="7.4V">7.4V</option></select></label></div>
+      <p><label><input id="cal-pose" type="checkbox"> 我已将实物与零位参考对齐</label><br><label><input id="cal-directions" type="checkbox"> 我已逐轴确认编号与模型运动方向一致</label></p>
+      <div class="controls"><button id="cal-save" class="primary">保存实测标定</button></div></details>
+      <div class="controls"><button id="hardware-enable" class="primary" disabled>按当前姿态接管电机</button><button id="hardware-disable" class="danger">退出接管并锁存停止</button></div>
+      <p id="commission-help" class="hint">接管会使电机维持当前姿态，不会自动回零。需要新鲜反馈、有效标定和工位确认；折叠在桌面或超出限位时不能授权跟随。退出接管保持已使能电机，不自动卸力；总线失联时软件无法保证保持。</p>
+      <details><summary>高级：查看原始电机数据与标定来源</summary><pre id="hardware-data">等待反馈</pre></details>
+    </section>
+    <section id="control-mode-panel" class="panel">
+      <label class="mode-field">跟随方式 <select id="control-mode"><option value="pose">位置＋绝对旋转</option><option value="position">仅位置（忽略手柄旋转）</option></select></label>
+      <p id="control-mode-help" class="hint">位置相对跟随，旋转绝对对齐；五轴在位置与三轴朝向之间选择可实现的姿态。松手保持，再握持追到当前朝向。切换前先停止并解除授权。</p>
+    </section>
+    <section class="connection"><span id="connection-dot" class="dot"></span><strong id="connection">正在连接本地服务</strong>
+      <span id="role-label"></span><span id="xr-label">尚未进入 XR</span></section>
+    <section id="debug-guide" class="panel debug-guide" hidden>
+      <div class="panel-heading"><h2>连接向导</h2><span>自动检查 · 每 2 秒</span></div>
+      <ol id="debug-steps" class="debug-steps"></ol>
+      <p id="next-step" class="next-step" role="status">正在检查 USB…</p>
+      <div class="controls"><button id="retry-pico" class="primary">重新打开头显页面</button>
+        <button id="self-test">一键自检</button><a id="scene-preview" class="button" target="_blank" rel="noopener">三维预览</a><a class="button" href="/xr-preview.html?demo=1" target="_blank" rel="noopener">提示布局预览</a><a id="debug-report" class="button" download>导出诊断包</a>
+        <button id="open-viewer">查看完整 CAD</button><button id="shutdown">结束调试</button></div>
+      <label id="device-picker" hidden>选择头显 <select id="device-select"></select></label>
+      <p id="self-test-result" class="hint">自检使用独立仿真，不改变当前机械臂。首次仍需在头显内允许 USB 调试，并点击进入 XR。</p>
+    </section>
+    <section class="grid">
+      <article class="panel stage"><div class="panel-heading"><h2>SO101 运动预演</h2><span id="state" class="state">WAITING</span></div>
+        <canvas id="arm-canvas" width="900" height="600" aria-label="SO101 关节位置的投影图"></canvas>
+        <p class="caption">绿色显示反馈关节，青点显示下发目标；原生 MuJoCo 窗口可查看完整 CAD。舵机响应模型尚未标定，不模拟负载扭矩或接触抓取。</p>
+        <div class="controls"><button id="arm" class="primary">授权仿真跟随</button><button id="stop" class="danger">停止并锁存</button><button id="unlock">解除停止</button></div>
+        <p id="reason" class="reason">等待头显。先连接，再进入 XR。</p>
+      </article>
+      <article class="panel input-panel"><div class="panel-heading"><h2>右手柄单手操作</h2><span id="source-mode">仅需右手柄</span></div>
+        <div class="controls"><button id="enter-ar" class="primary" disabled>检查头显透视…</button><button id="enter-vr" disabled>VR 仿真预览</button><button id="exit-xr" hidden>退出 XR</button></div>
+        <p id="xr-help" class="hint">进入透视遥操作后，通过头显看到真实机械臂，画面只叠加操作提示。VR 入口只用于仿真预览。</p>
+        <details><summary>查看位姿与时效</summary><dl><dt>手柄位置 / m</dt><dd id="position">—</dd><dt>旋转 / xyzw</dt><dd id="orientation">—</dd><dt>源帧 / 时效上界</dt><dd id="freshness">—</dd></dl></details>
+        <div class="meters"><label>Grip 握持 <progress id="grip" max="1" value="0"></progress><output id="grip-value">0.00</output></label>
+          <label>Trigger 扳机 <progress id="trigger" max="1" value="0"></progress><output id="trigger-value">0.00</output></label></div>
+        <div class="instructions"><b>仅用右手柄即可完成</b><ol><li>松开握持键和扳机，短按右 A 授权。</li><li>按住右 grip，移动、旋转右手控制机械臂；松开保持。</li><li id="gripper-guide">握持时扣扳机控制夹爪，按住 A 为精细模式。</li><li>右 B 停止。松开其他键，长按 A 两秒解除；松开 A，再短按 A 重新授权。</li></ol></div>
+        <p class="hint">头显内提供中文分步提示和按键反馈。橙色手柄表示浏览器估算位姿，当前只允许在仿真中使用。</p>
+      </article>
+    </section>
+    <details class="advanced"><summary>高级诊断：数据流、兼容性与按钮映射</summary><section class="grid">
+      <article class="panel"><h2>控制数据流</h2><div class="flow"><span>手柄输入</span><i>→</i><span>坐标映射</span><i>→</i><span>五轴 IK</span><i>→</i><span>限速目标</span><i>→</i><span>仿真关节</span></div>
+        <dl><dt>反馈末端 / m</dt><dd id="tcp">—</dd><dt>请求位置 / m</dt><dd id="requested">—</dd><dt>反馈关节 / °</dt><dd id="joints">—</dd><dt>反馈夹爪开度</dt><dd id="gripper">—</dd><dt>控制计算 / 周期</dt><dd id="timing">—</dd><dt>舵机响应模型</dt><dd id="motor-info">—</dd><dt>目标与反馈误差 / °</dt><dd id="motor-error">—</dd></dl>
+        <p class="hint">内部统一米、弧度；显示角度为度。相机、视觉模型和真实串口均未接入。</p>
+      </article>
+      <article class="panel"><h2>兼容性诊断</h2><p id="compatibility" class="hint">等待设备信息。</p>
+        <pre id="device-info">尚无手柄 profile / mapping 数据</pre>
+        <details><summary>检查并调整按钮索引</summary><p class="hint">所有按钮均在右手柄：trigger 0、grip 1、A 4、B 5。A 用于中立时授权、跟随时精细、停止后长按解除。先观察原始数据，确认后再调整。</p>
+          <div class="mapping"><label>Trigger<input id="map-trigger" type="number" min="0" max="15" value="0"></label><label>Grip<input id="map-grip" type="number" min="0" max="15" value="1"></label><label>A 精细<input id="map-precision" type="number" min="0" max="15" value="4"></label><label>B 停止<input id="map-stop" type="number" min="0" max="15" value="5"></label><label>A 授权/解除<input id="map-arm" type="number" min="0" max="15" value="4"></label></div>
+          <label><input type="checkbox" id="mapping-confirmed"> 当前不是 xr-standard；我已检查这些索引</label>
+        </details>
+        <div id="events" class="events" role="log" aria-live="polite"></div>
+      </article>
+    </section></details>
+    <footer>当前为 VR 仿真，未接入真实电机。默认舵机响应参考 STS3215 规格，速度、加速度和时延假设尚未在你的机械臂上标定；未模拟负载扭矩等动力学效果。</footer>
+  </main>
+  <canvas id="xr-canvas" hidden></canvas>
+  <script src="/input.js"></script><script src="/hud.js"></script><script src="/scene.js"></script><script src="/hardware.js"></script><script src="/client.js"></script>
+</body>
+</html>

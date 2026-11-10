@@ -1,0 +1,54 @@
+{
+  "repository": "https://github.com/ftservo/FTServo_Python",
+  "commit": "6c04ed3d424b57be1ef3e1abe3c13794c33fb442",
+  "files": [
+    {
+      "path": "LICENSE",
+      "sha256": "79548129370da7abd470cc7085e62629cca9eb930d08f213198701c39ec24431"
+    },
+    {
+      "path": "README.md",
+      "sha256": "0a4764ade2db669bfe4addfddd6dbf7ebffeeba692e1ac7b914cd0e214366263"
+    },
+    {
+      "path": "scservo_sdk/__init__.py",
+      "sha256": "f6e63bc58c3a3e5f92a5461ff9ecad7813be41d1fc0955fb85a5bee7d158a67a"
+    },
+    {
+      "path": "scservo_sdk/group_sync_read.py",
+      "sha256": "5584b160deb8b6b5f3572e06d02a68b00f6c802388937df986a0e272fa23080a"
+    },
+    {
+      "path": "scservo_sdk/group_sync_write.py",
+      "sha256": "a4e4b0644e8c8200238a891a1e2793b902b9011b34b7308261bc30bf84739eee"
+    },
+    {
+      "path": "scservo_sdk/hls.py",
+      "sha256": "d611c5307c0b856a0bee0a1fafe202bb2ef3bcf1fff340eebbb40393559ebd5b"
+    },
+    {
+      "path": "scservo_sdk/imu.py",
+      "sha256": "65da24f6988f14ea43e3c6e2bf28b74da541874e9871271fc9499a001aa729fe"
+    },
+    {
+      "path": "scservo_sdk/port_handler.py",
+      "sha256": "77c491e2e927235557179c446a08f730ab6e473cab79e63191971f299a8b4b6b"
+    },
+    {
+      "path": "scservo_sdk/protocol_packet_handler.py",
+      "sha256": "60ac1bbb56ff94b2ae26ed26746b03da9c9b812459c34488ea6ca12d8919171c"
+    },
+    {
+      "path": "scservo_sdk/scscl.py",
+      "sha256": "a918e5d3f64cc512c4a887d92af45b2b8b49c9eb8f099ca2b99bd7e9f0900b23"
+    },
+    {
+      "path": "scservo_sdk/scservo_def.py",
+      "sha256": "4d424845867b1211bce22dfc3ad8b2c17023066d9d18526248c0271430f02398"
+    },
+    {
+      "path": "scservo_sdk/sms_sts.py",
+      "sha256": "5d148d69b5c0211a8354e5ca376802a2bdb301e92cde3faba57bd37d169d4558"
+    }
+  ]
+}

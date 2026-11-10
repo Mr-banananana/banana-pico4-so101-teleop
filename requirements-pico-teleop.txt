@@ -1,0 +1,9 @@
+# Separate from LeRobot training and real-motor dependencies.
+numpy>=1.26,<3
+scipy>=1.14,<2
+mujoco>=3.2,<4
+websockets>=17.3,<18
+mink==1.4.0
+qpsolvers==4.13.0
+daqp==0.11.0
+pyserial>=3.5,<4

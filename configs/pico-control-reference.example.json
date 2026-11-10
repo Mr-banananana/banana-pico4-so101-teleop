@@ -1,0 +1,73 @@
+{
+  "schema": 1,
+  "signature": {
+    "board": "REPLACE_AFTER_INSPECTION",
+    "models": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "offsets": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "calibration_sha256": "REGENERATE_FROM_YOUR_LOCAL_CALIBRATION",
+  "robot_raw": [
+    2048,
+    2048,
+    2048,
+    2048,
+    2048,
+    2048
+  ],
+  "robot_q_rad": [
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "robot_rotation": [
+    [
+      1,
+      0,
+      0
+    ],
+    [
+      0,
+      1,
+      0
+    ],
+    [
+      0,
+      0,
+      1
+    ]
+  ],
+  "gripper_neutral": 0.5,
+  "hand_reference": null,
+  "orientation_mapping": "pointing_roll",
+  "wrist_offset_m": [
+    0,
+    0,
+    0
+  ],
+  "pose_policy": "split_roll",
+  "pose_orientation_length_m": 0.2,
+  "workspace_auto_entry": false,
+  "workspace_margin_m": 0.015,
+  "workspace_ready_margin_m": 0.04,
+  "workspace_entry_margin_m": 0.06,
+  "workspace_entry_lead_counts": 80,
+  "tool_roll_adjustment_deg": 90,
+  "gripper_mode": "toggle",
+  "is_template": true
+}
