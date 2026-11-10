@@ -26,7 +26,7 @@
       <details id="passive-calibration"><summary id="calibration-title">高级：重新手动标定（已有有效文件时无需操作）</summary>
       <p class="notice">这是首次安装或更换电机后的设置工具，不是每次遥操作前的操作。记录新零位会使当前映射失效，需要重新采集并保存完整标定。已有有效文件时保持此项折叠。</p>
       <p class="hint">零位决定角度起点；活动范围决定允许转动的边界；正反向决定模型与实物是否同向；夹爪端点决定开合量。它们与头显重新授权是两件事。</p>
-      <p class="hint">标定阶段保持各轴卸力并托住肩肘。先看下方零位参考或完整 CAD：对齐每个关节和夹爪朝向，再记录零位。这里显示的参考模型不是当前实测姿态。</p>
+      <p class="hint">标定阶段保持各轴卸力并托住肩肘。可打开 MuJoCo 模型展示，核对关节和夹爪朝向后再记录零位。这里显示的参考模型不是当前实测姿态。</p>
       <div class="controls"><button id="cal-reference">显示零位参考</button><button id="cal-zero">已对齐模型，记录零位</button><button id="cal-range">开始记录安全活动范围</button><button id="cal-closed">记录夹爪闭合端</button><button id="cal-open">记录夹爪打开端</button></div>
       <p class="hint">记录范围时，手动逐轴缓慢活动到日常使用的舒适边界，再回到中间；不用撞到机械止挡。方向选择改变后，下方模型显示未标定的实时映射预览，逐轴与实物核对。夹爪开合端要单独记录。</p>
       <div id="cal-signs" class="controls"></div>
@@ -49,14 +49,14 @@
       <p id="next-step" class="next-step" role="status">正在检查 USB…</p>
       <div class="controls"><button id="retry-pico" class="primary">重新打开头显页面</button>
         <button id="self-test">一键自检</button><a id="scene-preview" class="button" target="_blank" rel="noopener">三维预览</a><a class="button" href="/xr-preview.html?demo=1" target="_blank" rel="noopener">提示布局预览</a><a id="debug-report" class="button" download>导出诊断包</a>
-        <button id="open-viewer">查看完整 CAD</button><button id="shutdown">结束调试</button></div>
+        <button id="open-viewer">MuJoCo 仿真展示</button><button id="shutdown">结束调试</button></div>
       <label id="device-picker" hidden>选择头显 <select id="device-select"></select></label>
       <p id="self-test-result" class="hint">自检使用独立仿真，不改变当前机械臂。首次仍需在头显内允许 USB 调试，并点击进入 XR。</p>
     </section>
     <section class="grid">
       <article class="panel stage"><div class="panel-heading"><h2>SO101 运动预演</h2><span id="state" class="state">WAITING</span></div>
         <canvas id="arm-canvas" width="900" height="600" aria-label="SO101 关节位置的投影图"></canvas>
-        <p class="caption">绿色显示反馈关节，青点显示下发目标；原生 MuJoCo 窗口可查看完整 CAD。舵机响应模型尚未标定，不模拟负载扭矩或接触抓取。</p>
+        <p class="caption">绿色显示反馈关节，青点显示下发目标；点击「MuJoCo 仿真展示」可打开完整 SO101 场景并同步当前模型状态。真机模式只显示反馈映射，不会从此窗口驱动电机。</p>
         <div class="controls"><button id="arm" class="primary">授权仿真跟随</button><button id="stop" class="danger">停止并锁存</button><button id="unlock">解除停止</button></div>
         <p id="reason" class="reason">等待头显。先连接，再进入 XR。</p>
       </article>
