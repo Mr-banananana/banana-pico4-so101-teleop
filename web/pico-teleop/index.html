@@ -15,8 +15,13 @@
       <div class="panel-heading"><h2 id="hardware-heading">真机接管向导</h2><strong id="hardware-state">正在读取电机</strong></div>
       <p id="hardware-message" class="reason"></p>
       <p id="calibration-summary" class="hint">正在检查已保存的标定。标定用于把电机读数换算成模型关节角度。</p>
-      <ol id="handover-steps" class="instructions"><li id="handover-feedback">检查六路电机反馈和已保存的标定。</li><li>确认实物姿态与模型一致，并勾选下方工位确认；点击「按当前姿态接管电机」。</li><li>戴上头显进入透视遥操作，确认能看见真实机械臂；松开握持键和扳机，短按右 A 授权。</li><li>按住握持键移动右手；松开保持，右 B 停止。</li></ol>
+      <ol id="handover-steps" class="instructions"><li id="handover-feedback">导入 LeRobot 标定并检查六路电机反馈。</li><li>确认实物姿态与模型一致，并勾选下方工位确认；点击「按当前姿态接管电机」。</li><li>戴上头显进入透视遥操作，确认能看见真实机械臂；手柄竖直、松开握持键和扳机，短按右 A 记录竖直参考，再短按 A 授权。</li><li>按住握持键移动右手；松开保持，右 B 停止。</li></ol>
       <div id="software-guide" hidden><p class="hint">完整遥操作软件链路使用内存中的虚拟舵机；不会打开串口、启动 ADB 或移动真实机械臂。</p><div class="controls"><button id="virtual-demo" class="primary">运行虚拟手柄演示</button></div><p id="software-result" role="status">等待软件验证</p></div>
+      <div id="calibration-import">
+        <p class="hint">首次使用时，选择 LeRobot 导出的 SO101 标定 JSON。程序会只读匹配唯一控制板，核对六轴 ID、偏移、限位和供电读数，并自动生成本机运行参考。</p>
+        <div class="controls"><label>SO101 标定文件 <input id="calibration-file" type="file" accept=".json,application/json"></label><button id="calibration-import-button" class="primary">导入标定文件</button></div>
+        <p id="calibration-import-result" class="hint" role="status">导入不会启用电机。必须收到六轴新鲜反馈且电机未使能。</p>
+      </div>
       <p id="workcell-confirmation"><label><input id="cal-workcell" type="checkbox"> 我已核对模型与实物姿态一致；机械臂已固定、空载，工作区已清空</label></p>
       <details id="passive-calibration"><summary id="calibration-title">高级：重新手动标定（已有有效文件时无需操作）</summary>
       <p class="notice">这是首次安装或更换电机后的设置工具，不是每次遥操作前的操作。记录新零位会使当前映射失效，需要重新采集并保存完整标定。已有有效文件时保持此项折叠。</p>
@@ -61,7 +66,7 @@
         <details><summary>查看位姿与时效</summary><dl><dt>手柄位置 / m</dt><dd id="position">—</dd><dt>旋转 / xyzw</dt><dd id="orientation">—</dd><dt>源帧 / 时效上界</dt><dd id="freshness">—</dd></dl></details>
         <div class="meters"><label>Grip 握持 <progress id="grip" max="1" value="0"></progress><output id="grip-value">0.00</output></label>
           <label>Trigger 扳机 <progress id="trigger" max="1" value="0"></progress><output id="trigger-value">0.00</output></label></div>
-        <div class="instructions"><b>仅用右手柄即可完成</b><ol><li>松开握持键和扳机，短按右 A 授权。</li><li>按住右 grip，移动、旋转右手控制机械臂；松开保持。</li><li id="gripper-guide">握持时扣扳机控制夹爪，按住 A 为精细模式。</li><li>右 B 停止。松开其他键，长按 A 两秒解除；松开 A，再短按 A 重新授权。</li></ol></div>
+        <div class="instructions"><b>仅用右手柄即可完成</b><ol><li>松开握持键和扳机，短按右 A 授权；首次使用时，先把手柄竖直并短按 A 记录参考，再松开 A 后短按授权。</li><li>按住右 grip，移动、旋转右手控制机械臂；松开保持。</li><li id="gripper-guide">握持时扣扳机控制夹爪，按住 A 为精细模式。</li><li>右 B 停止。松开其他键，长按 A 两秒解除；松开 A，再短按 A 重新授权。</li></ol></div>
         <p class="hint">头显内提供中文分步提示和按键反馈。橙色手柄表示浏览器估算位姿，当前只允许在仿真中使用。</p>
       </article>
     </section>

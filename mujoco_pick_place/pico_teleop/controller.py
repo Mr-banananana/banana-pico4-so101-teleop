@@ -191,10 +191,20 @@ class TeleopController:
         self._idle_reference=None;self._idle_waiting=False
         self.reason = "已授权；按住右 grip 跟随，右 B 停止"
 
+    def _refresh_control_reference(self):
+        reference=getattr(self.backend,'control_reference',None) if self.physical else None
+        if reference is None or reference is self.control_reference:return
+        self.control_reference=reference;data=reference.data
+        self.pose_policy=data.get('pose_policy',self.pose_policy)
+        self.pose_orientation_length=float(data.get('pose_orientation_length_m',self.pose_orientation_length))
+        self.gripper_mode=data.get('gripper_mode',self.gripper_mode)
+        self.grasp=ToggleGrasp(float(data.get('gripper_neutral',self.last_command[5])))
+
     def capture_upright(self,now):
         f=self.latest
         error=getattr(self.backend,'control_reference_error',None)
         if error:raise ValueError(error)
+        self._refresh_control_reference()
         if (not self.physical or self.control_reference is None or self.armed
                 or not self.fresh(now) or not f.valid or not f.visible or f.emulated
                 or f.mode!='immersive-ar' or f.grip>.1 or f.trigger>.05 or f.stop):
@@ -268,6 +278,7 @@ class TeleopController:
             return
         if arm_edge and f.valid and f.visible and not self.armed:
             try:
+                self._refresh_control_reference()
                 if self.mode=='pose' and self.control_reference and self.control_reference.pending:
                     self.capture_upright(now)
                 else:self.arm(now)
@@ -494,6 +505,7 @@ class TeleopController:
         return best
 
     def tick(self, now, dt):
+        self._refresh_control_reference()
         current = self.backend.read()
         thermal_pending=bool(self.physical and getattr(self.backend,'thermal_pending',False)
                              and not self.backend.hardware_status().get('fault'))

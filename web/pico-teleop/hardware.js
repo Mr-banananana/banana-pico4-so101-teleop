@@ -1,7 +1,7 @@
 /* Passive commissioning controls. Never mark a measurement verified by default. */
 (() => {
   function create(send,role){
-    let supplyRestored=false,virtual=false,lastCalibrated=null,lastHardware=null;
+    let supplyRestored=false,virtual=false,lastCalibrated=null,lastHardware=null,importPending=false;
     const $=id=>document.getElementById(id),names=['肩部旋转','肩部俯仰','肘部','腕部俯仰','腕部旋转'];
     const jointNames={shoulder_pan:names[0],shoulder_lift:names[1],elbow_flex:names[2],wrist_flex:names[3],wrist_roll:names[4]};
     const signs=names.map((name,i)=>{
@@ -24,17 +24,39 @@
       $(id).disabled=role!=='monitor';
     }
     for(const select of signs)select.onchange=()=>send({type:'control',action:'cal_signs',...payload()});
+    $('calibration-import-button').onclick=async()=>{
+      const file=$('calibration-file').files && $('calibration-file').files[0];
+      if(!file){$('calibration-import-result').textContent='请先选择 LeRobot SO101 标定 JSON 文件。';return;}
+      if(file.size>12*1024){$('calibration-import-result').textContent='文件过大；请选择仅包含 SO101 标定数据的 JSON 文件（小于 12 KB）。';return;}
+      try{
+        const calibration=JSON.parse(await file.text());
+        if(!calibration || typeof calibration!=='object' || Array.isArray(calibration))throw new Error('顶层内容应为 JSON 对象');
+        importPending=true;$('calibration-import-button').disabled=true;
+        $('calibration-import-result').textContent='正在只读匹配控制板并核对六轴标定…';
+        if(!send({type:'control',action:'cal_import',calibration}))throw new Error('WebSocket 尚未连接，请稍后重试');
+      }catch(error){
+        importPending=false;$('calibration-import-button').disabled=false;
+        $('calibration-import-result').textContent='导入失败：'+(error && error.message || String(error));
+      }
+    };
     $('virtual-demo').onclick=()=>send({type:'control',action:'virtual_demo'});
-    return {render(s){
+    return {
+      isImportPending(){return importPending;},
+      succeedImport(){importPending=false;$('calibration-import-button').disabled=role!=='monitor' || !!(lastHardware && lastHardware.enabled);$('calibration-import-result').textContent='标定已导入并保存到本机运行目录；电机仍未使能。请核对实物工位，再手动接管。';},
+      failImport(message){importPending=false;$('calibration-import-button').disabled=role!=='monitor' || !!(lastHardware && lastHardware.enabled);$('calibration-import-result').textContent='导入失败：'+message;},
+      render(s){
       const h=s.hardware;$('hardware-panel').hidden=!h || role!=='monitor';if(!h)return;
       lastHardware=h;
-      virtual=!!h.is_virtual;$('software-guide').hidden=!virtual;$('passive-calibration').hidden=virtual;
+      virtual=!!h.is_virtual;$('software-guide').hidden=!virtual;$('passive-calibration').hidden=true;$('calibration-import').hidden=virtual;
+      if(h.calibrated){
+        $('calibration-import-button').disabled=role!=='monitor' || h.enabled;
+      }else if(!importPending){$('calibration-import-button').disabled=role!=='monitor' || h.enabled;}
       $('handover-steps').hidden=virtual;$('workcell-confirmation').hidden=virtual;
-      if(lastCalibrated!==h.calibrated){$('passive-calibration').open=!h.calibrated;lastCalibrated=h.calibrated;}
+      if(lastCalibrated!==h.calibrated){$('passive-calibration').open=false;lastCalibrated=h.calibrated;}
       const source=String(h.calibration_source || '已保存的标定').split(/[\\/]/).pop();
       $('calibration-summary').textContent=virtual?'虚拟模式使用独立标定，只验证软件链路。':h.calibrated?
-        `已加载 ${source}，无需重新标定。它将电机读数换算成关节角度；仍需核对模型与实物姿态一致。`:
-        '尚未加载有效标定，暂不能接管。标定用于把电机读数换算成关节角度；请检查文件或展开下方手动标定。';
+        `已加载 ${source}。标定把电机读数换算成关节角度；接管前仍需核对模型与实物姿态。`:
+        '尚未加载有效标定，暂不能接管。请选择 LeRobot 导出的 SO101 标定 JSON。';
       $('hardware-heading').textContent=virtual?'软件链路验证':'真机接管向导';
       $('handover-feedback').textContent=!h.calibrated?'缺少有效标定，尚不能换算关节反馈；先检查标定文件。':
         !h.feedback_valid?'电机反馈无效或过期：先恢复六路反馈，当前不能接管。':'已加载标定并收到有效电机反馈。';
@@ -44,8 +66,8 @@
         demo.ok?`软件验证通过：末端移动 ${(demo.displacement_m*1000).toFixed(1)}mm；已停止锁存`:'软件验证未通过：'+(demo.message || '请导出诊断');
       if(!supplyRestored && h.confirmed_supply){$('cal-supply').value=h.confirmed_supply;supplyRestored=true;}
       $('hardware-state').textContent=virtual?(h.ready?'虚拟舵机已接管':'虚拟舵机就绪 · 软件模式'):h.ready?'电机已接管':h.calibrated?'已标定 · 未接管':'只读标定 · 未使能';
-      $('hardware-message').textContent=h.fault || h.calibration_error || (!h.calibrated?'请先检查标定文件；没有有效文件时，再按高级手动标定说明采集并保存':!h.feedback_valid?'电机反馈无效或过期：请检查机械臂电源、USB 与总线连接，恢复后再接管':h.outside_joints && h.outside_joints.length?'当前关节超出保守限位：'+h.outside_joints.map(name=>jointNames[name] || name).join('、')+'；保持未接管，托住手动移回中间':h.ready?'现在可在头显用 A 授权；握持后跟随手柄的位置与当前朝向':
-        h.calibrated?'核对当前工位后，点击按当前姿态接管电机':'请先采集零位、活动范围与夹爪端点，再逐轴核对方向');
+      $('hardware-message').textContent=h.fault || h.calibration_error || (!h.calibrated?'导入 LeRobot SO101 标定文件后，再确认工位并接管。':!h.feedback_valid?'电机反馈无效或过期：请检查机械臂电源、USB 与总线连接，恢复后再接管':h.outside_joints && h.outside_joints.length?'当前关节超出保守限位：'+h.outside_joints.map(name=>jointNames[name] || name).join('、')+'；保持未接管，托住手动移回中间':h.ready?'现在可在头显用 A 授权；握持后跟随手柄的位置与当前朝向':
+        h.calibrated?'核对当前工位后，点击按当前姿态接管电机':'导入标定文件后再检查电机反馈');
       if(virtual && !h.fault && !h.calibration_error)$('hardware-message').textContent='点击虚拟手柄演示，检查时钟、授权、跟随、反馈和停止；全部在软件内运行。';
       if(h.workspace_preparation && !h.fault)$('hardware-message').textContent=h.workspace_preparation.message;
       if(virtual)$('commission-help').textContent='演示可重复运行，结束后保持停止锁存。虚拟响应只用于检查软件流程，不代表实机速度或负载表现。';

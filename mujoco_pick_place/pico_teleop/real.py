@@ -14,20 +14,15 @@ import numpy as np
 from .commission import RawCalibration,Commissioning
 from .simulation import SimulationArm
 from .motion import PHYSICAL_MOTION as MOTION,MOTION_PROFILE_NAME
-from .hardware import transact
+from .hardware import transact,inspect_motors
 from .temperature import ThermalValidator,diagnostic
 from .gripper_contact import GripperContactGuard
 
 
 class SerialBus:
     def __init__(self):
-        from serial.tools.list_ports import comports
-        from scripts.pico_hardware_check import load_sdk,ROOT
-        from .hardware import select_board,inspect_motors
-        config=json.loads((ROOT/'configs/pico-hardware.local.json').read_text(encoding='utf-8-sig'))
-        self.supply_version=config.get('user_confirmed_supply_version','12V')
-        if self.supply_version not in ('12V','7.4V'):raise ValueError('供电版本必须为12V或7.4V')
-        board=select_board(list(comports()),config['board'])
+        from scripts.pico_hardware_check import load_sdk,discover_motor_bus,_supply_from_feedback
+        found=discover_motor_bus();board=found['port']
         Port,Reader=load_sdk();self.port=Port(board.device)
         try:
             if not self.port.openPort():raise RuntimeError('无法打开控制板')
@@ -37,9 +32,12 @@ class SerialBus:
             registers=[m['registers'] for m in report['motors']]
             if any(r['model']['value_raw']!=777 or r['operating_mode']['value_raw']!=0 for r in registers):
                 raise ValueError('当前仅支持已核对的型号字777和单圈位置模式0')
-            self.signature=dict(board=board.serial_number,models=[r['model']['value_raw'] for r in registers],
+            self.supply_version=_supply_from_feedback(report)
+            self.signature=dict(board=found['signature']['board'],models=[r['model']['value_raw'] for r in registers],
                                 offsets=[r['homing_offset']['value_raw'] for r in registers])
             self.raw_limits=[[r['min_position']['value_raw'],r['max_position']['value_raw']] for r in registers]
+            if self.signature!=found['signature'] or self.raw_limits!=found['raw_limits']:
+                raise ValueError('控制板/电机配置在只读识别后发生变化；请重新启动检查')
             self.name=board.device
         except Exception:
             if self.port.is_open:self.port.closePort()
@@ -431,11 +429,11 @@ class PhysicalArm:
         from mujoco_pick_place.so101.kinematics import ROOT
         self.geometry=SimulationArm();self.model=self.geometry.model;self.data=self.geometry.data
         self.kinematics=self.geometry.kinematics;self.model_limits=self.geometry.limits.copy();self.limits=self.model_limits.copy()
-        self.profile_path=Path(profile_path or ROOT/'configs/pico-real-calibration.local.json')
+        self.runtime_dir=ROOT/'artifacts/pico-teleop'
+        self.profile_path=Path(profile_path or self.runtime_dir/'imported-calibration.json')
+        self.reference_path=Path(reference_path or self.runtime_dir/'control-reference.json')
         self.worker=MotorWorker(bus or SerialBus());self.commission=Commissioning()
-        config_path=ROOT/'configs/pico-hardware.local.json'
-        self.confirmed_supply=(getattr(self.worker.bus,'supply_version',None) if getattr(self.worker.bus,'is_virtual',False)
-                               else json.loads(config_path.read_text(encoding='utf-8-sig')).get('user_confirmed_supply_version'))
+        self.confirmed_supply=getattr(self.worker.bus,'supply_version',None)
         self.profile=None;self.calibration_error=None;self.q=np.r_[np.zeros(5),.5];self.feedback_valid=False
         self.preview_signs=np.ones(5);self.reference_view=True
         self.commit_guard=lambda:False;self.last_observed=None;self.ready=False
@@ -453,7 +451,7 @@ class PhysicalArm:
         if use_default_reference or reference_path is not None:
             from .reference import ControlReference
             import hashlib
-            path=Path(reference_path or ROOT/'configs/pico-control-reference.local.json')
+            path=self.reference_path
             if path.exists():
                 try:
                     if self.profile is None:raise ValueError('遥操作参考需要有效的舵机标定')
@@ -630,6 +628,45 @@ class PhysicalArm:
             self.control_reference.deactivate()
             self.control_reference_error='舵机标定已改变，旧遥操作参考已禁用；请重新记录机械臂参考'
 
+    def _import_lerobot_calibration(self,message,snap):
+        from .commission import import_lerobot
+        from .reference import ControlReference
+        from mujoco_pick_place.so101.calibration import JOINT_NAMES
+        import hashlib
+        payload=message.get('calibration')
+        if not isinstance(payload,dict):raise ValueError('请选择有效的 LeRobot JSON 标定文件')
+        rows=payload.get('calibration',payload)
+        if not isinstance(rows,dict) or set(rows)!=set(JOINT_NAMES):
+            raise ValueError('标定文件必须包含六个标准 SO101 关节')
+        data=import_lerobot(rows,self.worker.bus.signature,self.worker.bus.raw_limits,self.worker.bus.supply_version)
+        data['source_file']='LeRobot 标定文件（网页导入）'
+        profile=RawCalibration(data,self.worker.bus.signature,self.model_limits)
+        profile.validate_feedback(snap['raw'])
+        q=profile.decode(snap['raw'],require_bounds=False)
+        rotation=self.kinematics.fk(q[:5])[1]
+        self.runtime_dir.mkdir(parents=True,exist_ok=True)
+        temporary=self.profile_path.with_suffix('.tmp')
+        temporary.write_text(json.dumps(data,ensure_ascii=False,indent=2,allow_nan=False),encoding='utf-8')
+        temporary.replace(self.profile_path)
+        digest=hashlib.sha256(self.profile_path.read_bytes()).hexdigest()
+        reference_data=dict(schema=1,signature=self.worker.bus.signature,calibration_sha256=digest,
+            robot_raw=[int(v) for v in snap['raw']],robot_q_rad=q[:5].tolist(),robot_rotation=rotation.tolist(),
+            gripper_neutral=float(q[5]),hand_reference=None,orientation_mapping='pointing_roll',
+            wrist_offset_m=[0,0,0],pose_policy='split_roll',pose_orientation_length_m=.2,
+            workspace_auto_entry=False,workspace_margin_m=.015,workspace_ready_margin_m=.04,
+            workspace_entry_margin_m=.06,workspace_entry_lead_counts=80,tool_roll_adjustment_deg=90,
+            gripper_mode='toggle',captured_at=time.strftime('%Y-%m-%dT%H:%M:%S%z'))
+        reference=ControlReference(reference_data,self.reference_path)
+        ref_tmp=self.reference_path.with_suffix(self.reference_path.suffix+'.tmp')
+        ref_tmp.write_text(json.dumps(reference_data,ensure_ascii=False,indent=2,allow_nan=False),encoding='utf-8')
+        ref_tmp.replace(self.reference_path)
+        self.profile=profile;self.worker.configure_gripper(profile.closed,profile.open)
+        self.confirmed_supply=self.worker.bus.supply_version
+        self.limits=profile.limits.copy();self.kinematics.limits=self.limits.copy()
+        self.control_reference=reference;self.control_reference_error=None
+        self.reference_view=False;self.feedback_valid=True;self.q=q.copy();self.calibration_error=None
+        self.commission.recording=False
+
     def control(self,action,message):
         self.poll()
         if action=='hardware_disable':self.worker.disable();return
@@ -660,6 +697,13 @@ class PhysicalArm:
                 validate_enable();return True
             validate_enable()
             self.worker.request_enable(guard);return
+        if action=='cal_import':
+            self.worker.begin_calibration()
+            snap=self.worker.snapshot()
+            if not snap or time.monotonic()-snap['captured_at']>.1:raise ValueError('等待六路新鲜反馈')
+            if any(snap['torque']):raise ValueError('导入前请先退出接管并确认电机已卸力；导入不会启用电机')
+            self._import_lerobot_calibration(message,snap)
+            return
         self.worker.begin_calibration()
         snap=self.worker.snapshot()
         if not snap or time.monotonic()-snap['captured_at']>.1:raise ValueError('等待六路新鲜反馈')

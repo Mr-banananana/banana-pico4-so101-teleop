@@ -46,7 +46,7 @@ class VirtualBus:
 
 def create_virtual_arm(output_dir=None):
     directory=Path(output_dir or ROOT/'artifacts/pico-teleop');directory.mkdir(parents=True,exist_ok=True)
-    imported=ROOT/'configs/pico-real-calibration.local.json'
+    imported=ROOT/'artifacts/pico-teleop/imported-calibration.json'
     if imported.exists():data=deepcopy(json.loads(imported.read_text(encoding='utf-8')))
     else:
         data=dict(schema=1,signature=dict(board='virtual-so101',models=[777]*6,offsets=[0]*6),

@@ -75,10 +75,12 @@
         currentStatus=m;renderStatus(m);
       } else if (m.type === 'error') {
         event(m.message);$('reason').textContent=m.message;
+        if(hardwarePanel && hardwarePanel.isImportPending())hardwarePanel.failImport(m.message);
       } else if (m.type === 'self_test_result') {
         $('self-test-result').textContent=(m.ok?'自检通过。':'自检发现问题：')+
           m.checks.map(c=>(c.ok?'✓ ':'✕ ')+c.name).join('；')+'。'+m.message;
       } else if (m.type === 'control_result') {
+        if(m.action==='cal_import' && m.ok && hardwarePanel)hardwarePanel.succeedImport();
         if(m.action==='shutdown' && m.ok)finishDebug();
         else event(m.ok ? '操作已完成' : m.message);
       } else if (m.type === 'service_stopping') finishDebug();

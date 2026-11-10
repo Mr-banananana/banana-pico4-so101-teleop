@@ -32,26 +32,14 @@ PICO 通过 USB 调试连接电脑需要安装 Android Platform Tools（adb）�
 
 ## 驱动真机
 
-先复制配置模板，并填写自己的板卡信息：
-
-```powershell
-Copy-Item .\configs\pico-hardware.example.json .\configs\pico-hardware.local.json
-Copy-Item .\configs\pico-real-calibration.example.json .\configs\pico-real-calibration.local.json
-Copy-Item .\configs\pico-control-reference.example.json .\configs\pico-control-reference.local.json
-```
-
-模板不能直接驱动机械臂；按页面提示完成实机标定和控制参考记录。
-
-确认控制板、电源和六个电机已连接后，先做只读反馈检查：
-
-```powershell
-.\.venv-so101-hardware\Scripts\python.exe -m scripts.pico_hardware_check --read-motors
-```
-
-确认六轴反馈正常后启动真机页面：
+连接 SO101 控制板、六个电机和对应电源。安装好 PICO USB 调试所需的 Android Platform Tools，并在头显中允许 USB 调试。启动真机页面：
 
 ```powershell
 .\.venv-so101-hardware\Scripts\python.exe -m scripts.pico_debug --real
 ```
 
-本机配置、运行日志和虚拟环境已由 `.gitignore` 排除。项目采用 MIT 许可；SO-ARM101 模型和 Feetech SDK 的许可见各自目录。
+在电脑打开的遥操作页面中选择 LeRobot 导出的 SO101 标定 JSON，点击「导入标定文件」。程序会只读识别唯一的六轴控制板，并检查电机编号、偏移、限位和供电读数。若检查不匹配或发现多个控制板，导入会停止并显示原因。
+
+导入成功后，确认机械臂已固定、空载且工作区清空，勾选工位确认并点击「按当前姿态接管电机」。接着戴上 PICO，在透视页面把右手柄竖直、松开握持键和扳机，短按 A 记录手柄参考；松开 A 后再短按一次授权。按住握持键移动机械臂，松开保持，按 B 停止。
+
+标定与自动生成的运行参考保存在本机 `artifacts/pico-teleop`，不会提交到 Git。项目采用 MIT 许可；SO-ARM101 模型和 Feetech SDK 的许可见各自目录。
