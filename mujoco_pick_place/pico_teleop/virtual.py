@@ -41,6 +41,8 @@ class VirtualBus:
         self.bank.command(target)
     def enable(self,i):
         self.torque[i-1]=1;self.events.append(dict(operation='enable',id=i,time=time.monotonic()))
+    def disable(self,i):
+        self.torque[i-1]=0;self.events.append(dict(operation='disable',id=i,time=time.monotonic()))
     def close(self):self.bank.hold()
 
 

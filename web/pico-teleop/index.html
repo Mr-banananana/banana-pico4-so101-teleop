@@ -33,8 +33,8 @@
       <div class="controls"><label>电机供电版本 <select id="cal-supply"><option value="">请核对标签</option><option value="12V">12V</option><option value="7.4V">7.4V</option></select></label></div>
       <p><label><input id="cal-pose" type="checkbox"> 我已将实物与零位参考对齐</label><br><label><input id="cal-directions" type="checkbox"> 我已逐轴确认编号与模型运动方向一致</label></p>
       <div class="controls"><button id="cal-save" class="primary">保存实测标定</button></div></details>
-      <div class="controls"><button id="hardware-enable" class="primary" disabled>按当前姿态接管电机</button><button id="hardware-disable" class="danger">退出接管并锁存停止</button></div>
-      <p id="commission-help" class="hint">接管会使电机维持当前姿态，不会自动回零。需要新鲜反馈、有效标定和工位确认；折叠在桌面或超出限位时不能授权跟随。退出接管保持已使能电机，不自动卸力；总线失联时软件无法保证保持。</p>
+      <div class="controls"><button id="hardware-enable" class="primary" disabled>按当前姿态接管电机</button><button id="hardware-disable" class="danger">一键下电（手动调整）</button></div>
+      <p id="commission-help" class="hint">点击下电会关闭六个舵机的扭矩使能并核对反馈；请先托住机械臂，避免关节在重力下突然下落。再次接管会从当前姿态开始，不自动回零。</p>
       <details><summary>高级：查看原始电机数据与标定来源</summary><pre id="hardware-data">等待反馈</pre></details>
     </section>
     <section id="control-mode-panel" class="panel">

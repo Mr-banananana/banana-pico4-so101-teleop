@@ -123,13 +123,14 @@ class SerialBus:
         self._write(i,41,[MOTION.raw_motor_acceleration,value&255,value>>8,0,0,speed&255,speed>>8])
 
     def enable(self,i):self._write(i,40,[1])
+    def disable(self,i):self._write(i,40,[0])
     def close(self):self.port.closePort()
 
 
 class MotorWorker:
     def __init__(self,bus):
         self.bus=bus;self.enabled=False;self.fault=None;self.generation=0
-        self.pending=None;self.enable_request=None;self.cancel=False;self.active=None
+        self.pending=None;self.enable_request=None;self.disable_request=False;self.disabling=False;self.cancel=False;self.active=None
         self.latch_request=None
         self._queue_revision=0
         self.feedback=None;self.last_sent=None;self.done=threading.Event();self.thread=None
@@ -182,6 +183,14 @@ class MotorWorker:
         with self._state_lock:self._cancel_locked()
     def disable(self):
         with self._state_lock:self._cancel_locked();self.enabled=False
+    def request_hardware_disable(self):
+        # The serial owner performs the register writes and verifies readback.
+        # Invalidate every queued target immediately so no command survives
+        # the operator's request to release the motors.
+        with self._state_lock:
+            self.generation+=1;self.pending=None;self.enable_request=None;self.active=None
+            self.latch_request=None;self.cancel=True;self.holding=True
+            self.disable_request=True;self.disabling=True;self._queue_revision+=1
     def begin_calibration(self):
         with self._state_lock:
             if self.enabled:raise ValueError('先退出电机接管，再进行被动标定')
@@ -267,6 +276,25 @@ class MotorWorker:
         began=time.perf_counter();started=time.monotonic();feedback_ok=False
         self.write_wait_ms=0.
         try:
+            with self._state_lock:
+                disable_request=self.disable_request
+                if disable_request:self.disable_request=False
+            if disable_request:
+                # Always attempt all six writes, even if one bus transaction
+                # fails. A fresh readback then tells the UI which axes released.
+                self.enabled=False;self.enabled_guard=None;self.cancel=False
+                failures=[]
+                for i in range(1,7):
+                    try:self.bus.disable(i)
+                    except Exception as exc:failures.append(f'ID{i}: {exc}')
+                data=self.bus.read();captured=time.monotonic()
+                self.feedback=dict(**data,captured_at=captured,received_at=captured)
+                torque=data.get('torque')
+                if failures:raise RuntimeError('电机下电写入失败：'+'；'.join(failures))
+                if not isinstance(torque,(list,tuple)) or len(torque)!=6 or any(v!=0 for v in torque):
+                    raise RuntimeError('电机下电未确认；扭矩反馈：'+str(torque))
+                self.last_error=None
+                return
             data,current,started=self._sample()
             self.feedback=dict(**data,captured_at=started,received_at=time.monotonic())
             feedback_ok=True
@@ -398,7 +426,9 @@ class MotorWorker:
                 if hold_failed:self.cancel=True
             # A failed bus cannot guarantee a final hold. Never auto-resume.
         finally:
-            with self._state_lock:self.enabling=False
+            with self._state_lock:
+                self.enabling=False
+                if disable_request:self.disabling=False
             self.cycle_ms=(time.perf_counter()-began)*1000
 
     def _run(self):
@@ -602,6 +632,7 @@ class PhysicalArm:
                     temperature_age_ms=None if not snap else [None if t is None else round((time.monotonic()-t)*1000,1)
                         for t in snap.get('temperature_validated_at',[None]*6)],
                     fault=self.worker.fault,calibration_error=self.calibration_error,
+                    disabling=self.worker.disabling,
                     outside_joints=outside,limit_contact_joints=contact,
                     feedback_margin_counts=None if not self.profile else self.profile.feedback_margin_counts,
                     limits_deg=np.degrees(self.limits).tolist(),
@@ -654,7 +685,7 @@ class PhysicalArm:
             gripper_neutral=float(q[5]),hand_reference=None,orientation_mapping='pointing_roll',
             wrist_offset_m=[0,0,0],pose_policy='split_roll',pose_orientation_length_m=.2,
             workspace_auto_entry=True,workspace_margin_m=.015,workspace_ready_margin_m=.04,
-            workspace_entry_margin_m=.06,workspace_entry_lead_counts=80,tool_roll_adjustment_deg=90,
+            workspace_entry_margin_m=.06,workspace_entry_lead_counts=80,tool_roll_adjustment_deg=0,
             gripper_mode='toggle',captured_at=time.strftime('%Y-%m-%dT%H:%M:%S%z'))
         reference=ControlReference(reference_data,self.reference_path)
         ref_tmp=self.reference_path.with_suffix(self.reference_path.suffix+'.tmp')
@@ -669,7 +700,7 @@ class PhysicalArm:
 
     def control(self,action,message):
         self.poll()
-        if action=='hardware_disable':self.worker.disable();return
+        if action=='hardware_disable':self.worker.request_hardware_disable();return
         if action=='hardware_enable':
             if self.worker.thermal.pending or self.worker.thermal.fault_axis is not None:
                 raise ValueError('温度反馈待确认，等待新鲜测量后接管')

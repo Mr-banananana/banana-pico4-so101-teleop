@@ -146,7 +146,7 @@
       }
       document.querySelector('.stage h2').textContent=s.hardware.is_virtual?'虚拟舵机反馈 · 软件验证':s.hardware.pose_source==='feedback'?'SO101 真机反馈':s.hardware.pose_source==='zero_reference'?'零位参考 · 请对齐实物':'校准映射预览 · 尚未验证';
       document.querySelector('.stage .caption').textContent=s.hardware.is_virtual?'绿色为虚拟反馈，青点为目标；支持命令延迟、加减速和反馈量化，仅用于验证软件。':'绿色来自已标定的电机反馈，青点为目标；未标定时仅显示零位参考或映射预览。模型不反映真实障碍物。';
-      document.querySelector('footer').textContent=s.hardware.is_virtual?'软件验证：内存虚拟舵机，共用真机控制软件；没有串口或 ADB 操作，不代表实机已验收。':'真机模式：启动只读，标定后显式接管。右 A 授权、grip 跟随、B 软件停止；不自动卸力，不自动恢复运动。';
+      document.querySelector('footer').textContent=s.hardware.is_virtual?'软件验证：内存虚拟舵机，共用真机控制软件；没有串口或 ADB 操作，不代表实机已验收。':'真机模式：启动只读，标定后显式接管。右 A 授权、grip 跟随、B 软件停止；电脑页面的「一键下电」关闭六轴扭矩使能。';
       if(s.hardware.is_virtual && !softwareUiConfigured){
         softwareUiConfigured=true;$('retry-pico').hidden=true;
         document.querySelector('#debug-guide h2').textContent='软件验证向导';
