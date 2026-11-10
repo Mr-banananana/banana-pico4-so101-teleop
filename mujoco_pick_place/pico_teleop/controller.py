@@ -310,6 +310,9 @@ class TeleopController:
                             **({} if self.physical else dict(hand_R=Rotation.from_quat(frame.orientation).as_matrix(),tool_R=rotation.copy())),
                             precision=frame.precision,
                             gripper=float(q[5]), trigger=trigger,accepted_trigger=trigger)
+        if self._split_roll():
+            self._anchor['level_rotation']=self._horizontal_tool_rotation(rotation)
+            self._anchor['level_joint']=float(q[4])
         self.engaged = True
         self.operator_requested_position=p.copy()
         self.prediction_offset[:]=0
@@ -325,6 +328,27 @@ class TeleopController:
         return self.control_reference.wrist_offset if self.physical and self.control_reference else np.zeros(3)
 
     def _split_roll(self):return self.physical and self.mode=='pose' and self.pose_policy=='split_roll'
+
+    @staticmethod
+    def _horizontal_tool_rotation(rotation):
+        """Keep the calibrated tool-forward axis level while preserving its yaw and bank."""
+        value=np.asarray(rotation,float)
+        world_up=np.array([0.,0.,1.])
+        forward=value[:,0]-world_up*float(value[:,0]@world_up)
+        norm=float(np.linalg.norm(forward))
+        if norm<1e-5:
+            forward=np.array([1.,0.,0.])
+        else:forward/=norm
+        tool_up=value[:,2]-forward*float(value[:,2]@forward)
+        norm=float(np.linalg.norm(tool_up))
+        if norm<1e-5:
+            tool_up=world_up-forward*float(world_up@forward)
+            norm=float(np.linalg.norm(tool_up))
+        tool_up/=norm
+        tool_left=np.cross(tool_up,forward)
+        tool_left/=np.linalg.norm(tool_left)
+        tool_up=np.cross(forward,tool_left)
+        return np.column_stack((forward,tool_left,tool_up))
 
     def _configure_roll(self):
         from .roll import AbsoluteRoll
@@ -676,14 +700,19 @@ class TeleopController:
             if bounded_ik:
                 lower,upper,negative,positive=self._physical_velocity_bounds(reference,current,joint_limit,dt,now)
                 if self._split_roll():
-                    # Position task over the other joints; wrist roll is a
-                    # direct absolute joint target, never an SE(3) soft cost.
+                    # Pin wrist roll to its independent absolute target. The
+                    # other joints track position and softly keep tool-forward level.
                     roll_goal=float(np.clip(self.requested_roll,self.backend.limits[4,0]+1e-5,self.backend.limits[4,1]-1e-5))
                     error=roll_goal-reference[4];acc=MOTION.joint_acceleration
                     brake=np.sqrt((acc*dt)**2+2*acc*abs(error))-acc*dt
                     velocity=np.clip(np.sign(error)*brake,lower[4],upper[4])
                     lower[4]=upper[4]=velocity
-                    candidate=local_ik(p_ref+step,reference[:5],lower_step=lower*dt,upper_step=upper*dt)
+                    target_R=a['level_rotation']@Rotation.from_rotvec(
+                        [-(roll_goal-a['level_joint']),0.,0.]).as_matrix()
+                    self.requested_rotation=target_R.copy()
+                    candidate=pose_ik(p_ref+step,target_R,reference[:5],lower*dt,upper*dt,tcp_limit*dt,
+                                      orientation_weight=.35,motion_dt=dt,
+                                      joint_acceleration=MOTION.joint_acceleration)
                 elif self.mode=='pose' and self.pose_policy=='balanced':
                     candidate=self.coupled_pose_solver.step(clipped,target_R,reference[:5],lower*dt,upper*dt,
                         tcp_limit*dt,self.backend.limits,dt,orientation_length=self.pose_orientation_length,

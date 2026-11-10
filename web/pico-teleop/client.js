@@ -166,7 +166,7 @@
       (s.pose_policy==='balanced'?'位置、翻滚、俯仰、偏航共同求解；五轴无法全部满足时允许位置与朝向折中。':
        '旋转与俯仰按已记录的竖直参考跟随，位置优先。')+'松握持不会重置朝向；'+(s.gripper_mode==='toggle'?'扣一下扳机抓取，松开仍保持，再扣一下张开；握持键只控制位置与朝向。':'扳机松开回到已保存开度，按到底闭合。');
     if(s.pose_policy==='split_roll' && s.mode==='pose' && !s.control_reference_error && !(s.control_reference && s.control_reference.hand_required))
-      $('control-mode-help').textContent='坐标与翻滚分开跟随：手柄坐标控制末端位置，左右拧转单独控制夹爪自转；俯仰、偏航不跟随。松握持不重置翻滚角。扣一下扳机抓取，再扣一下张开。';
+      $('control-mode-help').textContent='坐标与翻滚分开跟随：手柄坐标控制末端位置，左右拧转单独控制夹爪自转；手柄俯仰、偏航不跟随，机械臂尽量保持夹爪前向水平。松握持不重置翻滚角。扣一下扳机抓取，再扣一下张开。';
     $('gripper-guide').textContent=s.gripper_mode==='toggle'?'扣一下扳机抓取，松开仍保持，再扣一下张开；无需按住握持键。':'握持时扣扳机控制夹爪，按住 A 为精细模式。';
     $('motor-info').textContent=s.hardware?`${s.hardware.is_virtual?'虚拟':'真机'}反馈年龄 ${s.hardware.feedback_age_ms}ms；关节轨迹限速${s.hardware.motion_profile?Number(s.hardware.motion_profile.joint_speed).toFixed(2):"—"}rad/s，实机响应以反馈为准`:s.motor?s.motor.name+'；参照 '+s.motor.reference_voltage+'V，实际供电未确认；指令/反馈各 '+Math.round(s.motor.command_delay_s*1000)+' / '+Math.round(s.motor.feedback_delay_s*1000)+'ms（假设）':'旧版瞬时关节更新';
     $('motor-error').textContent=s.motor?fmt(s.motor.target_rad.map((v,i)=>(v-s.motor.feedback_rad[i])*180/Math.PI),2):'—';

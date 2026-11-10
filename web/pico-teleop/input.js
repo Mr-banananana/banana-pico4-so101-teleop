@@ -53,7 +53,7 @@
       status.workspace_limited?'到达工作区边缘：沿边滑动或反向移动即可继续':
       status.joint_limit_limited?'到达关节边界：反向移动即可继续，无需重新授权':
       status.tracking_limited?(status.reason || '电机正在追赶，已自动减速；请放慢手部移动'):
-      state==='FOLLOWING'?(status.mode==='pose'?(status.pose_policy==='split_roll'?'坐标跟随＋独立翻滚；松开握持保持，B停止':status.pose_policy==='balanced'?'位置＋三轴朝向协同；五轴受限时自动折中':'位置＋绝对旋转：松开握持键保持，B停止'):'正在跟随右手：松开握持键保持，B停止'):
+      state==='FOLLOWING'?(status.mode==='pose'?(status.pose_policy==='split_roll'?'位置＋翻滚；夹爪尽量水平；松开握持保持，B停止':status.pose_policy==='balanced'?'位置＋三轴朝向协同；五轴受限时自动折中':'位置＋绝对旋转：松开握持键保持，B停止'):'正在跟随右手：松开握持键保持，B停止'):
       status && status.mode==='pose'?'已授权：握持后移动、拧转手柄控制夹爪':'已授权：按住握持键，移动右手控制机械臂';
     const hint=preparing && !stopped?'自动准备完成后恢复手柄控制｜B 软件停止':
       handRequired && !stopped?'本次 A 不会使能或移动电机；记录后松开 A，接管后再短按 A 授权':
