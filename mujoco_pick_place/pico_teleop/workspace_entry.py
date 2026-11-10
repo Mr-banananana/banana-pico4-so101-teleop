@@ -17,6 +17,7 @@ class WorkspaceEntry:
         self.state='waiting';self.message='等待反馈，准备自动进入工作区'
         self.running=False;self.cancelled=False;self.plan=None;self._token=None;self._last_goal_m=None
         self._enable_at=-float('inf');self._failed_raw=None;self._stable=[];self._owns_enable=False
+        self._feedback_progress=0.;self._feedback_progress_at=None;self._timeout_s=30.
         self._check_kinematics=type(arm.kinematics)(arm.model,site=arm.kinematics.site)
 
     def status(self):
@@ -24,6 +25,8 @@ class WorkspaceEntry:
                     target_m=self._last_goal_m if self.plan is None else self.plan['goal_m'],
                     margin_m=self.margin,entry_margin_m=self.entry_margin,
                     planned_margin_m=self.planned_margin,
+                    feedback_progress_m=self._feedback_progress,
+                    timeout_s=self._timeout_s,
                     lead_counts=self.lead_counts,settle_counts=self.settle_counts)
 
     def cancel(self,reason,latch=False):
@@ -135,19 +138,29 @@ class WorkspaceEntry:
             self._arc=np.r_[0.,np.cumsum(lengths)];self._total=float(self._arc[-1])
             if self._total<=1e-9:return self._block('目标没有可执行的进入行程')
             derivative=np.max(np.linalg.norm(np.diff(np.asarray(self.plan['tcp_path']),axis=0),axis=1)/np.maximum(lengths,1e-12))
-            self._speed=min(.6,.8*MOTION.raw_command_rate*a.profile.tick,.08/max(derivative,1e-9))
-            self._acc=min(3.,MOTION.joint_acceleration);self._distance=0.;self._velocity=0.
+            self._speed=min(1.0,.9*MOTION.raw_command_rate*a.profile.tick,.12/max(derivative,1e-9))
+            self._acc=min(6.,MOTION.joint_acceleration);self._distance=0.;self._velocity=0.
             self._profile=a.profile;self._epoch=w.hold_epoch;self._token=object();self.running=True
             self._gripper_raw=int(w.snapshot()['raw'][5]);self._grip=float(current[5])
             self._initial_violation=self._violation(p);self._started=now;self._stable=[];self._last_sample=None
+            self._feedback_progress=0.;self._feedback_progress_at=now
             self.state='moving';self.message='正在自动进入最近可达工作区，请等待'
         if w.hold_epoch!=self._epoch:return self._block('执行端中断了进入轨迹，请检查反馈')
-        if now-self._started>15:return self._block('进入工作区未在限定时间内完成')
+        if now-self._started>self._timeout_s:return self._block('自动进入超过30秒仍未完成，已保持；检查电机跟随和工作区可达性')
         if self.state=='latching':
             if w.holding and w.active is None and w.pending is None and w.latch_request is None:
                 self.running=False;self._token=None;self.state='ready';self.message='已自动进入工作区，可授权手柄';return False
             return True
         reference=self._point(self._distance)
+        # Measure progress from encoder feedback, not from targets submitted by
+        # software. Stop with a useful cause if the arm cannot follow at all.
+        nearest=int(np.argmin(np.linalg.norm(self._path-current[None,:5],axis=1)))
+        measured_progress=float(self._arc[nearest])
+        if measured_progress>self._feedback_progress+.001:
+            self._feedback_progress=measured_progress;self._feedback_progress_at=now
+        elif (self._distance>.01 and self._total-measured_progress>.01
+              and self._feedback_progress_at is not None and now-self._feedback_progress_at>2.):
+            return self._block('自动进入目标已下发，但电机反馈连续2秒未推进；检查机械阻挡、舵机负载和供电')
         room=max(0.,self.lead_counts*a.profile.tick-float(np.max(abs(reference-current[:5]))))
         brake=lambda r:np.sqrt((self._acc*dt)**2+2*self._acc*max(0.,r))-self._acc*dt
         cap=min(self._speed,brake(self._total-self._distance),brake(room))

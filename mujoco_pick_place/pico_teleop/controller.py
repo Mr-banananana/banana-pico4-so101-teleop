@@ -731,7 +731,7 @@ class TeleopController:
                 remaining=float(np.linalg.norm(self.requested_position-p_ref))
                 step_length=float(np.linalg.norm(step));direction=step/max(step_length,1e-12)
                 progress=float(np.dot(self.backend.kinematics.fk(candidate)[0]-p_ref,direction))
-                if nearest<.02 and remaining>.003 and step_length>1e-6 and progress<min(.00015,.1*step_length):
+                if remaining>.003 and step_length>1e-6 and progress<min(.00015,.1*step_length):
                     self.limit_limited=True
                     wait=self._geometry_wait
                     if wait is None or np.dot(direction,wait[2])<.5 or np.linalg.norm(p_ref-wait[1])>.0005:
