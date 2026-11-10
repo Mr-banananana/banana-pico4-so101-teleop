@@ -18,6 +18,7 @@ class WorkspaceEntry:
         self.running=False;self.cancelled=False;self.plan=None;self._token=None;self._last_goal_m=None
         self._enable_at=-float('inf');self._failed_raw=None;self._stable=[];self._owns_enable=False
         self._feedback_progress=0.;self._feedback_progress_at=None;self._timeout_s=30.
+        self.block_diagnostics=None
         self._check_kinematics=type(arm.kinematics)(arm.model,site=arm.kinematics.site)
 
     def status(self):
@@ -27,6 +28,7 @@ class WorkspaceEntry:
                     planned_margin_m=self.planned_margin,
                     feedback_progress_m=self._feedback_progress,
                     timeout_s=self._timeout_s,
+                    block_diagnostics=self.block_diagnostics,
                     lead_counts=self.lead_counts,settle_counts=self.settle_counts)
 
     def cancel(self,reason,latch=False):
@@ -53,6 +55,15 @@ class WorkspaceEntry:
         return True
 
     def _block(self,reason):
+        snap=self.arm.worker.snapshot()
+        if snap:
+            readback=snap.get('readback') or {}
+            self.block_diagnostics=dict(reason=reason,captured_at=snap.get('captured_at'),
+                raw=snap.get('raw'),goal_raw=readback.get('goal_raw'),torque=snap.get('torque'),
+                voltage_raw=snap.get('voltage_raw'),temperature=snap.get('temperature'),
+                current_raw=readback.get('current_raw'),load_raw=readback.get('load_raw'),
+                moving_raw=readback.get('moving_raw'),speed_raw=readback.get('speed_raw'),
+                status_raw=readback.get('status_raw'))
         if self.running or self._owns_enable:self.arm.worker.hold()
         self._owns_enable=False
         self.running=False;self._token=None;self.state='blocked';self.message=reason
@@ -160,7 +171,7 @@ class WorkspaceEntry:
             self._feedback_progress=measured_progress;self._feedback_progress_at=now
         elif (self._distance>.01 and self._total-measured_progress>.01
               and self._feedback_progress_at is not None and now-self._feedback_progress_at>2.):
-            return self._block('自动进入目标已下发，但电机反馈连续2秒未推进；检查机械阻挡、舵机负载和供电')
+            return self._block('自动进入目标已下发，但编码器连续2秒未推进；停止前电机快照已保存')
         room=max(0.,self.lead_counts*a.profile.tick-float(np.max(abs(reference-current[:5]))))
         brake=lambda r:np.sqrt((self._acc*dt)**2+2*self._acc*max(0.,r))-self._acc*dt
         cap=min(self._speed,brake(self._total-self._distance),brake(room))

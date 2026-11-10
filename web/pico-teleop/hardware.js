@@ -88,6 +88,8 @@
         '零位：'+JSON.stringify(h.commission.zero_counts),'记录中：'+h.commission.recording,
         '已记录范围：'+JSON.stringify(h.commission.range_counts),
         '夹爪闭合 / 打开：'+h.commission.gripper_closed+' / '+h.commission.gripper_open].join('\n');
+      if(h.workspace_preparation && h.workspace_preparation.block_diagnostics)
+        $('hardware-data').textContent+='\n自动进入停止前电机快照：'+JSON.stringify(h.workspace_preparation.block_diagnostics,null,2);
       if(h.calibration_source)$('hardware-data').textContent+='\n标定来源：'+h.calibration_source;
       $('hardware-enable').textContent=virtual?'接管虚拟舵机':'按当前姿态接管电机';
       $('hardware-disable').textContent=h.disabling?'正在下电…':torqueOff?'电机已下电':'一键下电（手动调整）';
