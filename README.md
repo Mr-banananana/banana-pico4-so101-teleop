@@ -1,28 +1,57 @@
-# SO101 + PICO 4 遥操作
+# Banana PICO 4 + SO-ARM101 遥操作
 
-本目录是从个人开发项目中整理出的独立源码副本，包含 PICO 透视网页、SO101 位姿与翻滚控制、夹爪接触保持、自动工作区准备，以及 STS3215 串口后端。它不包含开发者本机的电机标定、控制板序列号、PICO 会话令牌、运行日志或训练数据。
+## 下载
 
-默认控制方式为“坐标 + 独立翻滚”：手柄位置控制末端，手柄翻滚控制腕部自转；手柄俯仰、偏航不进入姿态目标。夹爪为扣一下抓取、再扣一下张开。夹爪接触保持由位置反馈推断，不是力传感器闭环。
+```powershell
+git clone https://github.com/Mr-banananana/banana-pico4-so101-teleop.git
+cd banana-pico4-so101-teleop
+```
 
-## 软件
+## 安装（Windows）
 
-- Python 3.12（推荐）
-- pip install -r requirements-pico-teleop.txt
-- 真机串口使用 pyserial（已列入依赖）；PICO 设备调试可选 Android Platform Tools（ADB）
-- SO101 网页模型使用 MuJoCo XML/STL。模型原始来源和许可见 assets/so101/README.md 与 assets/so101/LICENSE。
-- `configs/pico-sts3215-reference.json` 是软件仿真用的通用、未标定舵机响应参考，不是实机标定或性能承诺。
-- Feetech SDK 固定版本及上游许可见 vendor/ftservo/source.json、vendor/ftservo/LICENSE。
+需要 Python 3.12。打开 PowerShell，在项目目录运行：
 
-## 启动
+```powershell
+py -3.12 -m venv .venv-so101-hardware
+.\.venv-so101-hardware\Scripts\python.exe -m pip install -r requirements-pico-teleop.txt
+```
 
-- 仿真/浏览器预览：python -m scripts.pico_teleop
-- 内存舵机软件链路：python -m scripts.pico_teleop --virtual-hardware
-- 真机入口：先完成本机标定和供电/工位核对，再运行 python -m scripts.pico_teleop --real --debug。默认配置模板不能直接驱动机械臂。
+## 仿真试用
 
-网页由本机服务提供。服务为每次会话随机生成令牌；不要把运行 URL、artifacts/ 或 *.local.json 上传到公开仓库。
+```powershell
+.\.venv-so101-hardware\Scripts\python.exe -m scripts.pico_debug
+```
 
-## 本机配置
+要用内存舵机完整演示（不会连接或移动真机）：
 
-首次整理提供 `configs/*.example.json`，其中没有有效的板卡指纹、零位、关节方向或手柄参考，因此模板不应被视为可运行的真机标定。复制对应模板为 `.local.json` 后，使用自己的设备信息及校准流程重新生成有效配置。`.gitignore` 默认排除这些本机文件。
+```powershell
+.\.venv-so101-hardware\Scripts\python.exe -m scripts.pico_debug --virtual-hardware
+```
 
-SO101 机构模型以其上游文件许可为准；其许可与本项目 MIT 许可分开。发布前应保留各第三方源文件的版权和许可声明。
+PICO 通过 USB 调试连接电脑需要安装 Android Platform Tools（adb），并在头显中允许 USB 调试。通过 PICO 浏览器打开页面时，使用启动器显示的头显地址。
+
+## 驱动真机
+
+先复制配置模板，并填写自己的板卡信息：
+
+```powershell
+Copy-Item .\configs\pico-hardware.example.json .\configs\pico-hardware.local.json
+Copy-Item .\configs\pico-real-calibration.example.json .\configs\pico-real-calibration.local.json
+Copy-Item .\configs\pico-control-reference.example.json .\configs\pico-control-reference.local.json
+```
+
+模板不能直接驱动机械臂；按页面提示完成实机标定和控制参考记录。
+
+确认控制板、电源和六个电机已连接后，先做只读反馈检查：
+
+```powershell
+.\.venv-so101-hardware\Scripts\python.exe -m scripts.pico_hardware_check --read-motors
+```
+
+确认六轴反馈正常后启动真机页面：
+
+```powershell
+.\.venv-so101-hardware\Scripts\python.exe -m scripts.pico_debug --real
+```
+
+本机配置、运行日志和虚拟环境已由 `.gitignore` 排除。项目采用 MIT 许可；SO-ARM101 模型和 Feetech SDK 的许可见各自目录。
