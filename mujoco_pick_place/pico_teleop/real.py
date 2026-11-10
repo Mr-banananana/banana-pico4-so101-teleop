@@ -653,7 +653,7 @@ class PhysicalArm:
             robot_raw=[int(v) for v in snap['raw']],robot_q_rad=q[:5].tolist(),robot_rotation=rotation.tolist(),
             gripper_neutral=float(q[5]),hand_reference=None,orientation_mapping='pointing_roll',
             wrist_offset_m=[0,0,0],pose_policy='split_roll',pose_orientation_length_m=.2,
-            workspace_auto_entry=False,workspace_margin_m=.015,workspace_ready_margin_m=.04,
+            workspace_auto_entry=True,workspace_margin_m=.015,workspace_ready_margin_m=.04,
             workspace_entry_margin_m=.06,workspace_entry_lead_counts=80,tool_roll_adjustment_deg=90,
             gripper_mode='toggle',captured_at=time.strftime('%Y-%m-%dT%H:%M:%S%z'))
         reference=ControlReference(reference_data,self.reference_path)
