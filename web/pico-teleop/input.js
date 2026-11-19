@@ -14,12 +14,15 @@
     const p = valid ? pose.transform.position : null;
     const q = valid ? pose.transform.orientation : null;
     const read = i => buttonValue(buttons[i]);
+    const axes=gp && gp.axes || [];
+    const stickY=axes.length>=4?axes[3]:axes.length>=2?axes[1]:0;
     return {
       valid,
       emulated,
       position: p ? [p.x, p.y, p.z] : null,
       orientation: q ? [q.x, q.y, q.z, q.w] : null,
       grip: read(mapping.grip), trigger: read(mapping.trigger),
+      stick_y:Number.isFinite(stickY)?Math.max(-1,Math.min(1,stickY)):0,
       precision: read(mapping.precision) > .5 && read(mapping.grip) >= .35,
       stop: read(mapping.stop) > .5,
       // Keep A's raw state in every context: masking it by grip would invent
@@ -40,8 +43,8 @@
     const title=(options.passthrough?'SO101 实景透视｜':'SO101 VR｜')+(hardware?(hardware.is_virtual?'虚拟舵机软件验证｜':'真机｜'):motor?'舵机响应，仅仿真未标定｜':'仅仿真｜')+stateLabel(state);
     const moving=motor && status.motor.velocity_rad_s.some(v=>Math.abs(v)>.05);
     const main=status && status.control_reference_error?status.control_reference_error:
+      stopped?(status.reason || '松开握持键和扳机，短按 A 重置；真机故障会先检查反馈与供电'):
       hardware && hardware.fault?hardware.fault:
-      stopped?'松开握持键/扳机/B，长按A解除：'+Number(status.unlock_hold_s||0).toFixed(1)+' / 2秒':
       preparing && !stopped?preparation.message:
       handRequired && !stopped?'手柄竖直、松开握持和扳机，短按 A 只记录参考':
       hardware && !hardware.ready?(hardware.fault || (hardware.is_virtual?'先在电脑启动虚拟演示或接管虚拟舵机':!hardware.calibrated?'电脑尚未加载有效标定，请检查接管向导':!hardware.feedback_valid?'电机反馈无效，请在电脑检查电源与连接':'已加载标定：在电脑确认工位并按当前姿态接管电机')):
@@ -53,11 +56,11 @@
       status.workspace_limited?'到达工作区边缘：沿边滑动或反向移动即可继续':
       status.joint_limit_limited?'到达当前可达边缘：不可达位移已吸收；反向移动即可继续':
       status.tracking_limited?(status.reason || '电机正在追赶，已自动减速；请放慢手部移动'):
-      state==='FOLLOWING'?(status.mode==='pose'?(status.pose_policy==='split_roll'?'位置＋翻滚；夹爪尽量水平；松开握持保持，B停止':status.pose_policy==='balanced'?'位置＋三轴朝向协同；五轴受限时自动折中':'位置＋绝对旋转：松开握持键保持，B停止'):'正在跟随右手：松开握持键保持，B停止'):
-      status && status.mode==='pose'?'已授权：握持后移动、拧转手柄控制夹爪':'已授权：按住握持键，移动右手控制机械臂';
+      state==='FOLLOWING'?(status.mode==='pitch_stick'?'摇杆俯仰＋握持位置跟随；松开摇杆保持，B停止':status.mode==='pose'?(status.pose_policy==='split_roll'?'位置＋翻滚；夹爪尽量水平；松开握持保持，B停止':status.pose_policy==='balanced'?'位置＋三轴朝向协同；五轴受限时自动折中':'位置＋绝对旋转：松开握持键保持，B停止'):'正在跟随右手：松开握持键保持，B停止'):
+      status && status.mode==='pitch_stick'?'已授权：右摇杆控制夹爪俯仰；握持键控制位置':status && status.mode==='pose'?'已授权：握持后移动、拧转手柄控制夹爪':'已授权：按住握持键，移动右手控制机械臂';
     const hint=preparing && !stopped?'自动准备完成后恢复手柄控制｜B 软件停止':
       handRequired && !stopped?'本次 A 不会使能或移动电机；记录后松开 A，接管后再短按 A 授权':
-      stopped?'解除后松开A，再短按A授权；不会自动恢复运动':
+      stopped?'松开握持键和扳机后短按 A 重置；恢复完成后松开 A，再短按授权':
       !armed && status && status.reason?status.reason:
       status && status.gripper_mode==='toggle'?(status.grasp_closing?'已锁存抓取｜再扣扳机张开｜B停止':'扣一下扳机抓取｜松开仍保持｜B停止'):
       (status && status.mode==='pose'?'再握持追到当前朝向｜扳机开合｜A精细｜B软件停止':

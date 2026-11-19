@@ -42,7 +42,6 @@ class SimulationArm:
         mujoco.mj_forward(self.model, self.data)
 
     def points(self):
-        names = ("base", "shoulder", "upper_arm", "lower_arm", "wrist", "gripper")
         result = [[0., 0., 0.]]
         # Use joint-attached body origins; model names differ across CAD revisions.
         for joint in range(5):

@@ -33,7 +33,7 @@ def build_lift_plan(arm,raw):
     """Narrow table-adjacent corridor, never the normal XR workspace."""
     raw=np.asarray(raw,int);q=arm.profile.decode(raw)
     origin=arm.kinematics.fk(q[:5])[0]
-    if (not -.02<=origin[2]<arm.work_min[2] or q[2]<np.radians(80)
+    if (not arm.work_min[2]-.04<=origin[2]<arm.work_min[2] or q[2]<np.radians(80)
             or np.any(origin[:2]<arm.work_min[:2]+.005) or np.any(origin[:2]>arm.work_max[:2]-.005)):
         raise ValueError('准备抬升仅适用于肘部接近上端、末端接近桌面的当前姿态')
     if np.min(np.minimum(q[[0,1,3,4]]-arm.limits[[0,1,3,4],0],

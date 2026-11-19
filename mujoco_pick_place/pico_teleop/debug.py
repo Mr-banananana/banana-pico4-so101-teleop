@@ -1,5 +1,7 @@
 """Isolated commissioning checks: never authorize the live input controller."""
-APP_VERSION = "pico-debug-43.0-split-roll"
+from mujoco_pick_place import __version__
+
+APP_VERSION = __version__
 
 
 def self_test():

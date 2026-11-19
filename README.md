@@ -22,3 +22,7 @@
 PICO 自动连接需要 Android Platform Tools（`adb`）和头显中的 USB 调试授权；也可以在 PICO 浏览器打开页面显示的头显地址。仿真模式在头显点「VR 仿真预览」；真机模式点「进入透视遥操作」。导入不会启用电机。标定和自动生成的运行文件只保存在本机 `artifacts/pico-teleop`。
 
 项目采用 MIT 许可；SO-ARM101 模型和 Feetech SDK 的许可见各自目录。
+
+## 版本与更新
+
+当前版本和历史更新见 [CHANGELOG.md](CHANGELOG.md)。发布版本遵循语义化版本号；版本号统一维护在 `mujoco_pick_place/__init__.py`。开发者可运行 `python -m unittest discover -v` 执行离线回归测试。版本规则和发布步骤见 [版本管理说明](docs/versioning.md)。

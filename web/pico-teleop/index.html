@@ -38,7 +38,7 @@
       <details><summary>高级：查看原始电机数据与标定来源</summary><pre id="hardware-data">等待反馈</pre></details>
     </section>
     <section id="control-mode-panel" class="panel">
-      <label class="mode-field">跟随方式 <select id="control-mode"><option value="pose">位置＋绝对旋转</option><option value="position">仅位置（忽略手柄旋转）</option></select></label>
+      <label class="mode-field">跟随方式 <select id="control-mode"><option value="pose">位置＋绝对旋转</option><option value="position">仅位置（忽略手柄旋转）</option><option value="pitch_stick">摇杆俯仰＋握持位置</option></select></label>
       <p id="control-mode-help" class="hint">位置相对跟随，旋转绝对对齐；五轴在位置与三轴朝向之间选择可实现的姿态。松手保持，再握持追到当前朝向。切换前先停止并解除授权。</p>
     </section>
     <section class="connection"><span id="connection-dot" class="dot"></span><strong id="connection">正在连接本地服务</strong>
@@ -57,7 +57,7 @@
       <article class="panel stage"><div class="panel-heading"><h2>SO101 运动预演</h2><span id="state" class="state">WAITING</span></div>
         <canvas id="arm-canvas" width="900" height="600" aria-label="SO101 关节位置的投影图"></canvas>
         <p class="caption">绿色显示反馈关节，青点显示下发目标；点击「MuJoCo 仿真展示」可打开完整 SO101 场景并同步当前模型状态。真机模式只显示反馈映射，不会从此窗口驱动电机。</p>
-        <div class="controls"><button id="arm" class="primary">授权仿真跟随</button><button id="stop" class="danger">停止并锁存</button><button id="unlock">解除停止</button></div>
+        <div class="controls"><button id="arm" class="primary">授权仿真跟随</button><button id="stop" class="danger">停止并撤权</button><button id="unlock">重置 / 恢复</button></div>
         <p id="reason" class="reason">等待头显。先连接，再进入 XR。</p>
       </article>
       <article class="panel input-panel"><div class="panel-heading"><h2>右手柄单手操作</h2><span id="source-mode">仅需右手柄</span></div>
@@ -66,7 +66,7 @@
         <details><summary>查看位姿与时效</summary><dl><dt>手柄位置 / m</dt><dd id="position">—</dd><dt>旋转 / xyzw</dt><dd id="orientation">—</dd><dt>源帧 / 时效上界</dt><dd id="freshness">—</dd></dl></details>
         <div class="meters"><label>Grip 握持 <progress id="grip" max="1" value="0"></progress><output id="grip-value">0.00</output></label>
           <label>Trigger 扳机 <progress id="trigger" max="1" value="0"></progress><output id="trigger-value">0.00</output></label></div>
-        <div class="instructions"><b>仅用右手柄即可完成</b><ol><li>松开握持键和扳机，短按右 A 授权；首次使用时，先把手柄竖直并短按 A 记录参考，再松开 A 后短按授权。</li><li>按住右 grip，移动、旋转右手控制机械臂；松开保持。</li><li id="gripper-guide">握持时扣扳机控制夹爪，按住 A 为精细模式。</li><li>右 B 停止。松开其他键，长按 A 两秒解除；松开 A，再短按 A 重新授权。</li></ol></div>
+        <div class="instructions"><b>仅用右手柄即可完成</b><ol><li>松开握持键和扳机，短按右 A 授权；首次使用时，先把手柄竖直并短按 A 记录参考，再松开 A 后短按授权。</li><li>按住右 grip，移动、旋转右手控制机械臂；松开保持。</li><li id="gripper-guide">握持时扣扳机控制夹爪，按住 A 为精细模式。</li><li>右 B 停止。停止后松开握持键和扳机，短按 A 重置；真机故障会先检查反馈、供电和电机状态，通过后再短按 A 授权。未通过时页面会显示具体原因。</li></ol></div>
         <p class="hint">头显内提供中文分步提示和按键反馈。橙色手柄表示浏览器估算位姿，当前只允许在仿真中使用。</p>
       </article>
     </section>
@@ -77,7 +77,7 @@
       </article>
       <article class="panel"><h2>兼容性诊断</h2><p id="compatibility" class="hint">等待设备信息。</p>
         <pre id="device-info">尚无手柄 profile / mapping 数据</pre>
-        <details><summary>检查并调整按钮索引</summary><p class="hint">所有按钮均在右手柄：trigger 0、grip 1、A 4、B 5。A 用于中立时授权、跟随时精细、停止后长按解除。先观察原始数据，确认后再调整。</p>
+        <details><summary>检查并调整按钮索引</summary><p class="hint">所有按钮均在右手柄：trigger 0、grip 1、A 4、B 5。A 用于中立时授权、跟随时精细、停止后短按重置。先观察原始数据，确认后再调整。</p>
           <div class="mapping"><label>Trigger<input id="map-trigger" type="number" min="0" max="15" value="0"></label><label>Grip<input id="map-grip" type="number" min="0" max="15" value="1"></label><label>A 精细<input id="map-precision" type="number" min="0" max="15" value="4"></label><label>B 停止<input id="map-stop" type="number" min="0" max="15" value="5"></label><label>A 授权/解除<input id="map-arm" type="number" min="0" max="15" value="4"></label></div>
           <label><input type="checkbox" id="mapping-confirmed"> 当前不是 xr-standard；我已检查这些索引</label>
         </details>

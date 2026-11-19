@@ -102,7 +102,7 @@ class TeleopService:
         arm=backend or SimulationArm()
         self.backend_kind=getattr(arm,'kind','kinematic_simulation')
         self.controller = TeleopController(arm,allow_emulated=isinstance(arm,SimulationArm))
-        if start_stopped:self.controller.stop('更新前的停止状态已保留；长按 A 解除后才能准备和授权')
+        if start_stopped:self.controller.stop('更新前的停止状态已保留；短按 A 重置后再授权')
         self.controller.wall_clock = time.monotonic
         if self.controller.physical:
             arm.commit_guard=lambda:bool(self.controller.armed and not self.controller.stopped
@@ -216,7 +216,7 @@ class TeleopService:
         except (ConnectionClosed, TimeoutError):
             await peer.ws.close()
         except (TypeError,ValueError):
-            self.controller.stop('操作状态无法更新，停止已锁存；请查看电脑诊断')
+            self.controller.stop('操作状态无法更新，已停止并撤权；请查看电脑诊断')
             await peer.ws.close(code=1011,reason='invalid control status')
 
     async def _handle(self, ws):
@@ -256,13 +256,13 @@ class TeleopService:
                     if kind == "control" and role == "monitor":
                         action = message.get("action")
                         if self.controller.physical and (str(action).startswith('cal_') or str(action).startswith('hardware_')):
-                            if action=='hardware_disable':self.controller.stop('已退出真机接管，停止已锁存')
+                            if action=='hardware_disable':self.controller.stop('已退出真机接管，已停止并撤权')
                             elif self.controller.armed:raise ValueError('先停止并撤销手柄授权')
                             self.controller.backend.control(action,message)
                         elif action == "arm":self.controller.arm(now)
                         elif action == "stop":self.controller.stop()
-                        elif action == "reset_stop":self.controller.reset_stop()
-                        elif action in ("position", "pose"):self.controller.set_mode(action)
+                        elif action == "reset_stop":self.controller.request_stop_recovery()
+                        elif action in ("position", "pose", "pitch_stick"):self.controller.set_mode(action)
                         elif self.debug and action in ("reconnect_pico","select_device"):
                             if action=="select_device":self.assistant.select(message.get("serial"))
                             self.controller.revoke("重新连接头显，需要重新授权")
@@ -405,7 +405,7 @@ class TeleopService:
             if valid and self.controller.require_passthrough and self.controller.latest.mode!='immersive-ar':
                 info['message']='当前是不透明 VR；请退出并进入透视遥操作，先确认看得见真实机械臂。VR 预览不能授权真机跟随。'
             elif valid and self.controller.stopped:
-                info["message"]="已停止：松开右握持键、扳机和 B，长按右 A 两秒解除；松开 A，再短按 A 授权。"
+                info["message"]="已停止：松开握持键和扳机后短按右 A 重置；真机故障会先通过反馈与供电检查。恢复完成后再短按 A 授权；未通过时页面会显示原因。"
             elif valid and self.controller.armed:
                 info["message"]="右手柄跟随已授权：握住 grip 移动，扳机控制夹爪，按住 A 精细操作，B 停止。"
             elif valid:

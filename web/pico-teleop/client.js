@@ -9,6 +9,7 @@
   let xrMode = null, ended = false, deviceOptions = '';
   let xrCapabilities=null, renderedFrames=0, xrLifecycle=null, pageDeparted=false,xrContextKey=null,xrInspectionGeneration=0;
   let softwareUiConfigured=false;
+  let toolPitch=null,pitchFrameTime=null;
   const deviceReport=extra=>({userAgent:navigator.userAgent,control_scheme:'right_only',scene_version:'spatial-v3-servo',
     ...(xrCapabilities?{capabilities:xrCapabilities}:{}),...extra});
   const mapping = {trigger:0,grip:1,precision:4,stop:5,arm:4};
@@ -157,10 +158,12 @@
     $('control-mode').value=s.mode || 'position';
     const poseOption=Array.from($('control-mode').options || []).find(option=>option.value==='pose');
     if(poseOption)poseOption.textContent=s.pose_policy==='split_roll'?'坐标＋独立翻滚':'位置＋绝对旋转';
+    const pitchOption=Array.from($('control-mode').options || []).find(option=>option.value==='pitch_stick');
+    if(pitchOption)pitchOption.disabled=!s.hardware || s.hardware.is_virtual || !s.hardware.calibrated;
     $('control-mode').disabled=role!=='monitor' || ['ARMED','FOLLOWING'].includes(s.state);
-    $('control-mode-help').textContent=s.mode==='pose'?'位置相对跟随，旋转绝对对齐：松手转动后，再握持会追到当前朝向。五轴优先保持位置，无法实现任意三轴朝向。切换前先停止并解除授权。':'仅跟随手柄位置，忽略手柄旋转。切换前先停止并解除授权。';
+    $('control-mode-help').textContent=s.mode==='pitch_stick'?'真机模式：右摇杆前推使目标俯仰向下、后拉向上；松开摇杆保留目标角度，移动手柄时 IK 会协调各关节尽量保持夹爪朝向。该控制不需要按住握持键；握持键仍控制末端位置。摇杆速度受关节和工作区限制。':s.mode==='pose'?'位置相对跟随，旋转绝对对齐：松手转动后，再握持会追到当前朝向。五轴优先保持位置，无法实现任意三轴朝向。切换前先停止并解除授权。':'仅跟随手柄位置，忽略手柄旋转。切换前先停止并解除授权。';
     if(s.control_reference_error)$('control-mode-help').textContent=s.control_reference_error;
-    else if(s.control_reference)$('control-mode-help').textContent=s.mode==='position'?
+    else if(s.control_reference && s.mode!=='pitch_stick')$('control-mode-help').textContent=s.mode==='position'?
       '仅位置模式：松开按键后短按 A 授权；不跟随手柄旋转，扳机使用已保存的夹爪默认开度。':s.control_reference.hand_required?
       '机械臂参考已保存。进入透视，把手柄竖直并松开握持键和扳机，短按 A 只记录竖直参考，不授权、不使能电机。':
       (s.pose_policy==='balanced'?'位置、翻滚、俯仰、偏航共同求解；五轴无法全部满足时允许位置与朝向折中。':
@@ -374,9 +377,26 @@
         // Publish each native XR sample: a 16 ms gate halves 72/90 Hz input.
         // The transport still rejects backlog; the host consumes latest state.
         const now=performance.now();if(!sessionId)return;
+        const pitchMode=currentStatus && currentStatus.mode==='pitch_stick';
+        const authorized=currentStatus && ['ARMED','FOLLOWING'].includes(currentStatus.state);
+        const reportedPitch=currentStatus && currentStatus.tool_pitch_target_rad;
+        if(!pitchMode || !authorized || !controls.valid || created.visibilityState!=='visible'){
+          toolPitch=Number.isFinite(reportedPitch)?reportedPitch:null;pitchFrameTime=null;
+        }else{
+          if(toolPitch===null)toolPitch=Number.isFinite(reportedPitch)?reportedPitch:0;
+          const delta=pitchFrameTime===null?0:Math.min(.05,Math.max(0,(now-pitchFrameTime)/1000));
+          pitchFrameTime=now;
+          const y=controls.stick_y;
+          const speed=Math.abs(y)<=.12?0:Math.sign(y)*(Math.abs(y)-.12)/.88;
+          // Positive world pitch points the tool down; XR forward is negative Y.
+          toolPitch=Math.max(-Math.PI/2,Math.min(Math.PI/2,toolPitch-speed*.8*delta));
+        }
+        // Publish the seed before authorization too. The server can authorize
+        // and tick before the browser receives its next ARMED status update.
+        if(pitchMode && Number.isFinite(toolPitch))controls.tool_pitch_rad=toolPitch;
         send({type:'frame',session_id:sessionId,seq:++sequence,client_time_ms:now,space_epoch:epoch,reference_space:spaceName,mode,visible:xrSession.visibilityState==='visible',right:controls});
         if(now-lastDiagnostic>500){
-          const describe=s=>s?{profiles:s.profiles,mapping:s.gamepad?s.gamepad.mapping:null,gripSpace:!!s.gripSpace,buttons:s.gamepad?s.gamepad.buttons.map(b=>({value:b.value,pressed:b.pressed})):[]}:null;
+          const describe=s=>s?{profiles:s.profiles,mapping:s.gamepad?s.gamepad.mapping:null,gripSpace:!!s.gripSpace,axes:s.gamepad?s.gamepad.axes:[],buttons:s.gamepad?s.gamepad.buttons.map(b=>({value:b.value,pressed:b.pressed})):[]}:null;
           const details=deviceReport({xr_mode:mode,blend_mode:xrSession.environmentBlendMode,rendered_frames:renderedFrames,
             ar_passthrough:mode==='immersive-ar',scene_content:mode==='immersive-ar'?'passthrough_hud_only':'virtual_robot',
             right:describe(right),emulatedPosition:pose?!!pose.emulatedPosition:null,

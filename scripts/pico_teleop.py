@@ -4,7 +4,6 @@ import asyncio
 from contextlib import nullcontext
 from datetime import datetime
 import json
-from pathlib import Path
 import secrets
 from mujoco_pick_place.pico_teleop.timing import clock as time
 import webbrowser

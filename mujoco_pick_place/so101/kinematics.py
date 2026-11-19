@@ -104,7 +104,7 @@ class Kinematics:
             return delta,d.site_xpos[self.site].copy(),jp[:,:5][:,free]*scale
         length=max(np.linalg.norm(target-origin),tcp_radius)
         def objective(x):
-            delta,p,j=evaluate(x);e=(p-target)/length
+            delta,p,_=evaluate(x);e=(p-target)/length
             return float(e@e+1e-5*np.sum((delta/scale)**2))
         def gradient(x):
             delta,p,j=evaluate(x)
@@ -131,7 +131,7 @@ class Kinematics:
         return q
 
     def ik_pose_step(self,position,rotation,seed_q,lower_step,upper_step,tcp_radius,orientation_weight=.1,
-                     *,motion_dt=None,joint_acceleration=None):
+                     *,motion_dt=None,joint_acceleration=None,position_slack_m=.001):
         """Position-priority soft orientation inside the same joint/TCP bounds.
 
         A verified position solution defines a feasible error tube. Orientation
@@ -144,6 +144,7 @@ class Kinematics:
                 or tcp_radius<=0 or orientation_weight<=0 or np.any(lo>hi)
                 or not np.allclose(R.T@R,np.eye(3),atol=1e-6) or abs(np.linalg.det(R)-1)>1e-6):
             raise ValueError('invalid constrained pose target')
+        if not np.isfinite(position_slack_m) or position_slack_m<=0:raise ValueError('invalid position slack')
         stopping=motion_dt is not None or joint_acceleration is not None
         if stopping and (motion_dt is None or joint_acceleration is None
                 or not np.isfinite([motion_dt,joint_acceleration]).all()
@@ -158,7 +159,7 @@ class Kinematics:
                 or np.any(base-seed<lo-1e-9) or np.any(base-seed>hi+1e-9)
                 or np.linalg.norm(self.fk(base)[0]-origin)>tcp_radius+1e-9):
             base=self.ik_tcp_step(target,seed,lo,hi,tcp_radius)
-        base_position=self.fk(base)[0];tube=max(.001,float(np.linalg.norm(base_position-target))+1e-5)
+        base_position=self.fk(base)[0];tube=max(position_slack_m,float(np.linalg.norm(base_position-target))+1e-5)
         d=mujoco.MjData(self.model);jp=np.zeros((3,self.model.nv));jr=np.zeros_like(jp)
         stop_data=mujoco.MjData(self.model) if stopping else None
         free=hi-lo>1e-12;fixed=(lo+hi)/2;scale=max(float(np.max(abs(np.r_[lo,hi]))),1e-4)
@@ -211,6 +212,57 @@ class Kinematics:
             residual_m=float(np.linalg.norm(actual_p-target)),position_tube_m=tube,
             orientation_error_rad=float(np.linalg.norm(Rotation.from_matrix(R@actual_R.T).as_rotvec())),
             orientation_fallback=fallback,joint_step_rad=float(np.linalg.norm(q-seed)))
+        return q
+
+    def ik_pitch_step(self,position,pitch,seed_q,lower_step,upper_step,tcp_radius):
+        """Solve position and world tool elevation, leaving yaw/bank free.
+
+        Bounds already include velocity, acceleration and encoder lead budgets.
+        The wrist goal is never overwritten after the solve.
+        """
+        target=np.asarray(position,float);seed=np.asarray(seed_q,float)
+        low=np.maximum(self.limits[:,0]+1e-5,seed+np.asarray(lower_step,float))
+        high=np.minimum(self.limits[:,1]-1e-5,seed+np.asarray(upper_step,float))
+        if (target.shape!=(3,) or seed.shape!=(5,) or low.shape!=(5,) or high.shape!=(5,)
+                or not np.isfinite(np.r_[target,seed,low,high,pitch,tcp_radius]).all()
+                or np.any(low>high) or tcp_radius<=0 or abs(pitch)>np.pi/2):
+            raise ValueError('invalid pitch step')
+        # The independent hand-roll mapping owns SO101 wrist_roll. Pitch and
+        # Cartesian position IK may move the first four joints, but must not
+        # use ID5 as an uncommanded null-space degree of freedom. If braking
+        # bounds exclude zero, take the smallest admissible step toward rest.
+        low[4]=high[4]=seed[4]+float(np.clip(0.,low[4]-seed[4],high[4]-seed[4]))
+        free=high-low>1e-12;fixed=(low+high)/2
+        d=mujoco.MjData(self.model);jp=np.zeros((3,self.model.nv));jr=np.zeros_like(jp)
+        origin=self.fk(seed)[0]
+        def evaluate(x):
+            q=fixed.copy();q[free]=x;d.qpos[:5]=q
+            mujoco.mj_kinematics(self.model,d);mujoco.mj_comPos(self.model,d)
+            mujoco.mj_jacSite(self.model,d,jp,jr,self.site)
+            forward=d.site_xmat[self.site].reshape(3,3)[:,0]
+            h=max(1e-8,float(np.linalg.norm(forward[:2])))
+            actual=np.arctan2(-forward[2],h)
+            df=np.cross(jr[:,:5].T,forward).T
+            dpitch=(-h*df[2]+forward[2]*(forward[:2]@df[:2])/h)/max(1e-12,float(forward@forward))
+            return q,d.site_xpos[self.site].copy(),actual,dpitch
+        def residual(x):
+            q,p,a,_=evaluate(x)
+            return np.r_[(p-target)/.002,(a-pitch)/.05,(q-seed)*.01]
+        def jac(x):
+            _,_,_,dp=evaluate(x)
+            return np.vstack((jp[:,:5]/.002,dp[None,:]/.05,np.eye(5)*.01))[:,free]
+        x=np.clip(seed,low,high)[free]
+        if np.any(free):
+            fit=least_squares(residual,x,jac=jac,bounds=(low[free],high[free]),
+                              max_nfev=16,ftol=1e-7,xtol=1e-8,gtol=1e-8)
+            x=fit.x
+        q,p,actual,_=evaluate(x)
+        # Nonlinear TCP verification remains independent of the optimizer.
+        if np.linalg.norm(p-origin)>tcp_radius+1e-9:
+            q=self.ik_tcp_step(target,seed,low-seed,high-seed,tcp_radius)
+            p,r=self.fk(q);f=r[:,0];actual=np.arctan2(-f[2],np.linalg.norm(f[:2]))
+        self.last_step=dict(solver='position_world_pitch',residual_m=float(np.linalg.norm(p-target)),
+                            pitch_error_rad=float(actual-pitch))
         return q
 
     def ik(self,position,rotation=None,seed_q=None,tolerance=.002):

@@ -450,10 +450,11 @@ class MotorWorker:
 
 class PhysicalArm:
     kind='so101_real'
-    # Standard CAD zero reaches x≈0.381m. Physical mode has its own envelope;
-    # it remains intersected with measured joint limits. Autonomous entry is
-    # enabled only by the user's bound control-reference configuration.
-    work_min=np.array([.06,-.28,.015]);work_max=np.array([.40,.28,.40])
+    # Expanded around the measured forward pose (service FK x≈.437, z≈-.018;
+    # current model FK x≈.443, z≈-.033). The z coordinate is robot-base-relative;
+    # the model does not include the table surface. Reachable commands still
+    # pass calibrated joint, feedback, acceleration and path checks.
+    work_min=np.array([.06,-.28,-.06]);work_max=np.array([.47,.28,.40])
     def __init__(self,profile_path=None,bus=None,reference_path=None):
         use_default_reference=profile_path is None and bus is None
         from mujoco_pick_place.so101.kinematics import ROOT

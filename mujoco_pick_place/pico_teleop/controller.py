@@ -57,7 +57,9 @@ class TeleopController:
         self._release_pending = False
         self._arm_button = False
         self._arm_released = False
-        self._unlock_held_since = None
+        self._pitch_target = None
+        self._pitch_clutch = None
+        self._fault_recovery_state = 'idle'
         self.wall_clock = None
         self._physical_velocity=np.zeros(5)
         self.prediction_offset=np.zeros(3)
@@ -104,7 +106,6 @@ class TeleopController:
         self._release_pending = False
         self._arm_released = False
         self.reason = reason
-        self._unlock_held_since = None
         self._physical_velocity[:]=0
         self.prediction_offset[:]=0
         self.tracking_limited=False
@@ -121,17 +122,68 @@ class TeleopController:
         self.constraint_pause=False
         self._workspace_wait=False;self.workspace_limited=False
 
-    def stop(self, reason="软件停止已锁存"):
+    def stop(self, reason="已停止并撤销手柄授权"):
         entry=getattr(self.backend,'workspace_entry',None)
         if entry is not None:entry.cancel(reason,latch=True)
         self.revoke(reason)
         self.stopped = True
+        self._fault_recovery_state = 'idle'
 
     def reset_stop(self):
         self.stopped = False
+        self._fault_recovery_state = 'idle'
         entry=getattr(self.backend,'workspace_entry',None)
         if entry is not None:entry.resume()
         self.revoke("停止已解除；松开右 A、握持键与扳机，再短按 A 授权")
+
+    def request_stop_recovery(self):
+        """Clear a software stop, or request a guarded hardware re-enable."""
+        if not self.stopped:return
+        worker=getattr(self.backend,'worker',None)
+        if not self.physical or worker is None:
+            self.reset_stop();return
+        if worker.enabled and worker.fault is None and self.backend.ready:
+            self.reset_stop();return
+        if worker.fault is None:
+            # Software/input stops do not need a torque-enable cycle.
+            self.reset_stop();return
+        if self._fault_recovery_state=='pending':
+            self._advance_stop_recovery()
+            return
+        # A new explicit A press or dashboard click retries a failed request.
+        self._fault_recovery_state='idle'
+        try:
+            # Recovery is a single explicit action. PhysicalArm still validates
+            # feedback, calibration, supply, limits and thermal state before it
+            # can queue torque-enable writes.
+            if self.require_passthrough and (self.latest is None or self.latest.mode!='immersive-ar'):
+                raise ValueError('真机故障恢复需要透视模式并能看到实物')
+            profile=getattr(self.backend,'profile',None)
+            workcell_verified=bool(profile and profile.data.get('workcell_verified') is True)
+            self.backend.control('hardware_enable',{'workcell_verified':workcell_verified})
+            self._fault_recovery_state='pending'
+            self.reason='已请求恢复：正在检查六轴反馈与扭矩；通过后松开 A，再短按 A 授权跟随'
+        except Exception as exc:
+            self._fault_recovery_state='failed'
+            self.reason='恢复未通过：'+str(exc)+'；处理提示后短按 A 重试'
+
+    def _advance_stop_recovery(self):
+        """Finish an asynchronous enable request without requiring A to stay held."""
+        if self._fault_recovery_state!='pending':return
+        worker=getattr(self.backend,'worker',None)
+        if worker is None:
+            self._fault_recovery_state='failed'
+            self.reason='恢复未完成：未找到电机控制器'
+            return
+        with worker._state_lock:
+            pending=worker.enabling or worker.enable_request is not None
+        if worker.enabled and worker.fault is None and self.backend.ready:
+            self.reset_stop()
+        elif pending:
+            self.reason='正在恢复：等待六轴反馈和扭矩读回'
+        else:
+            self._fault_recovery_state='failed'
+            self.reason='恢复未通过：'+str(worker.fault or '反馈尚未就绪')+'；处理提示后短按 A 重试'
 
     def fresh(self, now):
         return (self.latest is not None and self.session_id is not None
@@ -174,11 +226,13 @@ class TeleopController:
                     raise ValueError('正在自动将末端移入工作区，请稍候后授权')
                 raise ValueError('实际末端不在真机工作区；需要先进入工作区')
         if self.stopped or not self.fresh(now) or not f.valid or not f.visible:
-            raise ValueError("需要新鲜有效输入，且停止锁存已解除")
+            raise ValueError("需要新鲜有效输入，并先重置停止状态")
         if self.require_passthrough and f.mode!='immersive-ar':
             raise ValueError('真实机械臂需要透视遥操作输入；请退出 VR 仿真预览并进入 AR 透视')
-        if f.grip > .1 or f.trigger > .05 or f.stop:
-            raise ValueError("请先完全松开 grip 和 trigger")
+        if self.mode=='pitch_stick' and f.tool_pitch_rad is None:
+            raise ValueError('等待头显同步目标俯仰角；请松开 A 稍候重试，持续提示时刷新头显页面')
+        if f.grip > .1 or f.trigger > .05 or f.stop or (self.mode=='pitch_stick' and abs(f.stick_y)>.12):
+            raise ValueError("请先松开握持键、扳机，并让摇杆回中")
         if self.motor_response and np.max(abs(self.backend.servos.velocity))>.05:
             raise ValueError('舵机仍在减速，请保持松开，稍后再短按 A')
         self.armed = True
@@ -187,6 +241,9 @@ class TeleopController:
         self.tracking_limited=False;self._tracking_wait=None
         self._anchor = None
         self.last_command=self._planning_reference(self.backend.read())
+        if self.mode=='pitch_stick':
+            self._pitch_target=self._tool_pitch(self.backend.kinematics.fk(self.last_command[:5])[1])
+            self._pitch_clutch=None
         self.grasp.reset(self._gripper_reference(self.last_command[5]))
         self._idle_reference=None;self._idle_waiting=False
         self.reason = "已授权；按住右 grip 跟随，右 B 停止"
@@ -217,9 +274,13 @@ class TeleopController:
     def set_mode(self, mode):
         if self.physical and mode=='pose' and not callable(getattr(self.backend.kinematics,'ik_pose_step',None)):
             raise ValueError('当前后端缺少受约束姿态 IK')
-        if mode not in ("position", "pose") or self.armed:
-            raise ValueError("只能在未授权时切换 position / pose")
+        if mode not in ("position", "pose", "pitch_stick") or self.armed:
+            raise ValueError("只能在未授权时切换跟随方式")
+        if mode=='pitch_stick' and (not self.physical or not callable(getattr(self.backend.kinematics,'ik_pitch_step',None))):
+            raise ValueError('摇杆俯仰模式目前只支持已标定的 SO101 真机')
         self.mode = mode
+        self._pitch_target=self._tool_pitch(self.backend.kinematics.fk(self.backend.read()[:5])[1]) if mode=='pitch_stick' else None
+        self._pitch_clutch=None
         self.requested_rotation=None
         self.orientation.reset()
 
@@ -242,8 +303,6 @@ class TeleopController:
         previous = self.latest
         if previous and f.emulated!=previous.emulated:
             self.revoke("追踪质量已改变，请松开 A 后重新授权，避免位姿跳变")
-        if now-self.received_at > .2:
-            self._unlock_held_since = None
         if previous and (f.space_epoch != previous.space_epoch
                          or f.reference_space != previous.reference_space):
             self.revoke("头显坐标原点已重置：跟随已暂停；松开握持键和扳机，再短按 A 重新授权")
@@ -264,17 +323,16 @@ class TeleopController:
         arm_edge = f.arm and not self._arm_button and self._arm_released
         self._arm_button = f.arm
         if self.stopped:
-            # Recover only from a deliberate continuous, neutral A hold.
-            # This clears the latch only; releasing and pressing A again is
-            # still required before authorization can be granted.
+            # A is a one-press reset while the other controls are neutral.
+            # Do not require a release edge: faults often arrive while A was
+            # already held for precision mode. Hardware re-enable still runs
+            # the backend's normal validation before any torque is enabled.
             neutral=f.grip<=.1 and f.trigger<=.05 and not f.stop
-            if f.valid and f.visible and f.arm and self._arm_released and neutral:
-                if self._unlock_held_since is None:self._unlock_held_since=now
-                held=now-self._unlock_held_since
-                if held>=2.:self.reset_stop()
-                else:self.reason=f"停止已锁存；保持右 A {max(0.,2.-held):.1f} 秒以解除（握持键、扳机与 B 保持松开）"
-            else:
-                self._unlock_held_since=None
+            if (f.valid and f.visible and f.arm and neutral
+                    and self._fault_recovery_state!='failed'):
+                self.request_stop_recovery()
+            elif self._fault_recovery_state=='failed' and not f.arm:
+                self._fault_recovery_state='idle'
             return
         if arm_edge and f.valid and f.visible and not self.armed:
             try:
@@ -328,6 +386,11 @@ class TeleopController:
         return self.control_reference.wrist_offset if self.physical and self.control_reference else np.zeros(3)
 
     def _split_roll(self):return self.physical and self.mode=='pose' and self.pose_policy=='split_roll'
+
+    @staticmethod
+    def _tool_pitch(rotation):
+        forward=np.asarray(rotation)[:,0]
+        return float(np.arctan2(-forward[2],np.linalg.norm(forward[:2])))
 
     @staticmethod
     def _horizontal_tool_rotation(rotation):
@@ -441,7 +504,7 @@ class TeleopController:
         if np.dot((current[:5]-baseline[:5])/lead[:5],direction)>=2/MOTION.tracking_lead_counts:
             self._tracking_wait=(now,current.copy(),direction_now)
         elif now-since>=1.5:
-            self.stop('电机反馈持续未跟上目标，停止已锁存；检查机械阻挡和反馈后再授权')
+            self.stop('电机反馈持续未跟上目标，已停止；检查机械状态后短按 A 重置')
             return None
         return command
 
@@ -531,6 +594,12 @@ class TeleopController:
     def tick(self, now, dt):
         self._refresh_control_reference()
         current = self.backend.read()
+        if self.stopped and self._fault_recovery_state=='pending':
+            self._advance_stop_recovery()
+        if self.physical and not self.stopped:
+            hardware_fault=self.backend.hardware_status().get('fault')
+            if hardware_fault:
+                self.stop('真机故障：'+str(hardware_fault)+'；松开握持键和扳机，短按 A 重试恢复')
         thermal_pending=bool(self.physical and getattr(self.backend,'thermal_pending',False)
                              and not self.backend.hardware_status().get('fault'))
         if self.physical and not self.backend.ready and self.armed:
@@ -578,6 +647,17 @@ class TeleopController:
         if self._thermal_wait:
             self._thermal_wait=False;self._motion_epoch=getattr(self.backend,'motion_epoch',None)
             self.last_command=self._planning_reference(current)
+        pitch_mode=self.physical and self.mode=='pitch_stick'
+        if pitch_mode:
+            # Packet angle is a tool/world pitch target, never a motor angle.
+            if f.tool_pitch_rad is None:
+                self.revoke('输入包缺少目标俯仰角；请刷新头显页面后重新授权');return self.status(now)
+            self._pitch_target=f.tool_pitch_rad
+            clutch=f.grip>=.65 if not self.engaged else f.grip>=.35
+            if self._pitch_clutch!=clutch:
+                self._anchor=None;self.engaged=False
+                self._pitch_clutch=clutch
+            self._release_pending=False
         if self._release_pending:
             self.workspace_limited=False
             self.limit_limited=False
@@ -592,7 +672,7 @@ class TeleopController:
             self.last_command = self._planning_reference(current)
             self.reason = "握持已释放，保持；再次握持重置位置起点，并追到手柄当前绝对朝向"
             return self.status(now)
-        if f.grip < .35:
+        if f.grip < .35 and not pitch_mode:
             self.workspace_limited=False
             self.limit_limited=False
             self.requested_rotation=None
@@ -608,7 +688,7 @@ class TeleopController:
                 if self.motor_response or self.physical:self.backend.hold()
                 self.last_command = self._planning_reference(current)
             return self.status(now)
-        if f.grip < .65 and not self.engaged:
+        if f.grip < .65 and not self.engaged and not pitch_mode:
             return self.status(now)
         if not self.engaged or self._anchor["precision"] != f.precision:
             if self.motor_response and not self.engaged and np.max(abs(self.backend.servos.velocity))>.05:
@@ -622,7 +702,12 @@ class TeleopController:
             self.requested_roll=self.roll.update(f.orientation,dt,f.seq)
         elif self.physical and (self.mode=='pose' or np.any(self._wrist_offset())):
             target_R=self.orientation.update(f.orientation,dt,f.seq)
-        hand=self._control_point(f.position)
+        hand=(a['operator_hand'].copy() if pitch_mode and not self._pitch_clutch else self._control_point(f.position))
+        if pitch_mode:
+            level=self._horizontal_tool_rotation(self.backend.kinematics.fk(current[:5])[1])
+            axis=np.cross([0.,0.,1.],level[:,0])
+            target_R=Rotation.from_rotvec(axis*self._pitch_target).as_matrix()@level
+            self.requested_rotation=target_R.copy()
         if self.physical and a.get('intent') is not None:
             hand=a['intent'].update(hand,dt,f.seq)
             a['hand_velocity']=a['intent'].prediction_velocity
@@ -678,7 +763,7 @@ class TeleopController:
         # The physical worker still enforces its raw lead/step bounds, expiry,
         # fresh feedback and cancellation before every motor write.
         reference=self.last_command.copy() if self.motor_response or self.physical else current.copy()
-        p_ref,R_ref=self.backend.kinematics.fk(reference[:5])
+        p_ref,_=self.backend.kinematics.fk(reference[:5])
         step = clipped-p_ref
         planning_ratio=MOTION.tcp_planning_ratio if self.physical else 1.
         step *= min(1., tcp_limit*planning_ratio*dt/max(np.linalg.norm(step), 1e-12))
@@ -696,7 +781,7 @@ class TeleopController:
             braking_limited=False;rebase_at_limit=False;self.limit_limited=False
             local_ik=getattr(self.backend.kinematics,'ik_position_step',None)
             pose_ik=getattr(self.backend.kinematics,'ik_pose_step',None)
-            bounded_ik=self.physical and ((self.mode=='position' or self._split_roll()) and local_ik is not None or self.mode=='pose' and pose_ik is not None)
+            bounded_ik=self.physical and ((self.mode=='position' or self._split_roll()) and local_ik is not None or self.mode in ('pose','pitch_stick') and pose_ik is not None)
             if bounded_ik:
                 lower,upper,negative,positive=self._physical_velocity_bounds(reference,current,joint_limit,dt,now)
                 if self._split_roll():
@@ -713,6 +798,9 @@ class TeleopController:
                     candidate=pose_ik(p_ref+step,target_R,reference[:5],lower*dt,upper*dt,tcp_limit*dt,
                                       orientation_weight=.35,motion_dt=dt,
                                       joint_acceleration=MOTION.joint_acceleration)
+                elif pitch_mode:
+                    candidate=self.backend.kinematics.ik_pitch_step(p_ref+step,self._pitch_target,
+                        reference[:5],lower*dt,upper*dt,tcp_limit*dt)
                 elif self.mode=='pose' and self.pose_policy=='balanced':
                     candidate=self.coupled_pose_solver.step(clipped,target_R,reference[:5],lower*dt,upper*dt,
                         tcp_limit*dt,self.backend.limits,dt,orientation_length=self.pose_orientation_length,
@@ -815,7 +903,7 @@ class TeleopController:
             if self.physical:self._physical_velocity=(joints-reference[:5])/dt
             self.last_command = command.copy()
             self.constraint_pause=False
-            if rebase_at_limit:self._absorb_joint_edge(hand,self.backend.kinematics.fk(joints)[0])
+            if rebase_at_limit and not pitch_mode:self._absorb_joint_edge(hand,self.backend.kinematics.fk(joints)[0])
             self.reason = self.physical_label+"跟随中" if self.physical else "跟随中（仿真）"
             if self.physical and self.tracking_limited:
                 lead=getattr(self.backend,'tracking_lead',None)
@@ -856,18 +944,18 @@ class TeleopController:
                     thermal_pause=self._thermal_wait,
                     constraint_pause=self.constraint_pause,constraint_pause_events=self.constraint_pause_events,
                     last_motion_pause=self.last_motion_pause,pose_policy=self.pose_policy,
-                    requested_roll_rad=self.requested_roll,
+                    requested_roll_rad=self.requested_roll,tool_pitch_target_rad=self._pitch_target,
+                    tool_pitch_actual_rad=self._tool_pitch(rotation),
+                    pitch_solver=getattr(self.backend.kinematics,'last_step',None) if self.mode=='pitch_stick' else None,
                     pose_solver=None if self.coupled_pose_solver is None else self.coupled_pose_solver.last_step,
                     control_point_m=None if self.control_point is None else self.control_point.tolist(),
-                    unlock_hold_s=round(min(2.,max(0.,now-self._unlock_held_since)),2)
-                        if self.stopped and self._unlock_held_since is not None and self.fresh(now) else 0.,
                     reason=self.reason, mode=self.mode, session_id=self.session_id,
                     gripper_mode=self.gripper_mode,grasp_closing=self.grasp.closing,
                     grasp_target=self.grasp.target,
                     source_seq=self.last_seq, age_ms=round(max(0, age)*1000, 1) if math.isfinite(age) else None,
                     input=None if f is None else dict(position=None if f.position is None else f.position.tolist(),
                         orientation=None if f.orientation is None else f.orientation.tolist(),
-                        grip=f.grip, trigger=f.trigger, precision=f.precision,arm=f.arm,stop=f.stop,valid=f.valid,emulated=f.emulated,
+                        grip=f.grip, trigger=f.trigger, stick_y=f.stick_y, precision=f.precision,arm=f.arm,stop=f.stop,valid=f.valid,emulated=f.emulated,
                         visible=f.visible, xr_mode=f.mode),
                     q_rad=q[:5].tolist(), q_deg=np.degrees(q[:5]).tolist(), gripper=float(q[5]),
                     command=self.last_command.tolist(),command_tcp_m=command_p.tolist(), tcp_m=p.tolist(),tcp_rotation=rotation.tolist(),

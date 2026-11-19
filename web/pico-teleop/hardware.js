@@ -63,7 +63,7 @@
       $('virtual-demo').disabled=!virtual || role!=='monitor' || !!(s.software_demo && s.software_demo.running);
       const demo=s.software_demo;
       $('software-result').textContent=!demo?'点击演示：自动同步时钟、授权、握持跟随、停止并断开':demo.running?'正在运行虚拟手柄演示…':
-        demo.ok?`软件验证通过：末端移动 ${(demo.displacement_m*1000).toFixed(1)}mm；已停止锁存`:'软件验证未通过：'+(demo.message || '请导出诊断');
+        demo.ok?`软件验证通过：末端移动 ${(demo.displacement_m*1000).toFixed(1)}mm；已停止并撤权`:'软件验证未通过：'+(demo.message || '请导出诊断');
       if(!supplyRestored && h.confirmed_supply){$('cal-supply').value=h.confirmed_supply;supplyRestored=true;}
       const torqueOff=!virtual && h.feedback_valid && h.feedback_age_ms!=null && h.feedback_age_ms<100 && Array.isArray(h.torque) && h.torque.length===6 && h.torque.every(v=>v===0);
       $('hardware-state').textContent=virtual?(h.ready?'虚拟舵机已接管':'虚拟舵机就绪 · 软件模式'):h.disabling?'正在关闭电机使能':torqueOff?'电机已下电 · 可手动调整':h.ready?'电机已接管':h.calibrated?'已标定 · 未接管':'只读标定 · 未使能';
@@ -71,7 +71,7 @@
         h.calibrated?'核对当前工位后，点击按当前姿态接管电机':'导入标定文件后再检查电机反馈');
       if(virtual && !h.fault && !h.calibration_error)$('hardware-message').textContent='点击虚拟手柄演示，检查时钟、授权、跟随、反馈和停止；全部在软件内运行。';
       if(h.workspace_preparation && !h.fault)$('hardware-message').textContent=h.workspace_preparation.message;
-      if(virtual)$('commission-help').textContent='演示可重复运行，结束后保持停止锁存。虚拟响应只用于检查软件流程，不代表实机速度或负载表现。';
+      if(virtual)$('commission-help').textContent='演示可重复运行，结束后保持停止状态。虚拟响应只用于检查软件流程，不代表实机速度或负载表现。';
       else $('commission-help').textContent=torqueOff?'六轴扭矩使能已关闭，可手动调整机械臂。调整后重新核对工位，再按当前姿态接管；接管会从当前姿态开始。':'点击「一键下电」会关闭六个舵机的扭矩使能并核对反馈；机械臂可能在重力下下落，请先托住关节。接管会从当前姿态开始，不自动回零。';
       if(h.workspace_preparation)$('commission-help').textContent='已开启自动进入工作区：启动后接管并进入最近可达的区内位置，完成后可用 A 授权。遥操作保留边界缓冲；B 停止会取消自动准备，不会自行重新启动。';
       $('hardware-data').textContent=[`${h.port} ｜反馈年龄 ${h.feedback_age_ms==null?'无反馈':h.feedback_age_ms+'ms'}`,

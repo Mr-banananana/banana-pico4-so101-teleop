@@ -9,7 +9,7 @@
   const hudCanvas=document.getElementById('headset-hud');
   function showDemo(state){
     const following=state==='FOLLOWING';
-    status={state,reason:state==='READY'?'松开握持键和扳机，再短按 A 授权':'',gripper:.5,unlock_hold_s:0,
+    status={state,reason:state==='READY'?'松开握持键和扳机，再短按 A 授权':'',gripper:.5,
       points:[[0,0,0],[.04,0,.06],[.08,0,.16],[.18,0,.24],[.26,0,.2],[.29,0,.19]],tcp_m:[.29,0,.19],
       input:{valid:true,emulated:false,grip:following?1:0,trigger:0,arm:false,stop:false}};
   }

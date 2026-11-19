@@ -51,7 +51,8 @@
     text(compact?(status.mode==='pose'?(status.pose_policy==='split_roll'?'坐标＋独立翻滚 · 松开即可保持':'位置＋绝对旋转 · 松开即可保持'):'握持跟随中 · 松开即可保持'):lines[1],96,44,'#f1f7f3',compact?1:2,50,true);
     const normalize=s=>String(s).replace(/[\s，,。；;：:]/g,'');
     const detail=normalize(lines[1])===normalize(lines[2])?'握持键控制跟随 · 扳机控制夹爪 · B 停止':lines[2];
-    const compactHint=status && status.gripper_mode==='toggle'?(status.grasp_closing?'抓取保持 · 再扣扳机张开 · B停止':'扣一下抓取 · 再扣张开 · B停止'):
+    const compactHint=status && status.mode==='pitch_stick'?'右摇杆前推向下 · 后拉向上 · 松开保持':
+      status && status.gripper_mode==='toggle'?(status.grasp_closing?'抓取保持 · 再扣扳机张开 · B停止':'扣一下抓取 · 再扣张开 · B停止'):
       status && status.mode==='pose'?'姿态绝对对齐 · 扳机开合 · A精细 · B停止':'扳机调夹爪 · A 精细 · B 停止';
     text(compact?compactHint:detail,compact?144:192,30,'#cfdfdf',compact?1:2,38);
     const keys=`A ${controls.arm?'按下':'松开'}   B ${controls.stop?'按下':'松开'}   握持 ${Math.round(controls.grip*100)}%   扳机 ${Math.round(controls.trigger*100)}%`;

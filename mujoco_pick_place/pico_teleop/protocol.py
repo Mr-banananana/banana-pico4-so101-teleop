@@ -49,7 +49,9 @@ class InputFrame:
     precision: bool
     stop: bool
     arm: bool
+    stick_y: float
     emulated: bool
+    tool_pitch_rad: float | None = None
 
 
 def parse_frame(payload, session_id, last_seq):
@@ -82,11 +84,17 @@ def parse_frame(payload, session_id, last_seq):
     grip, trigger = (number(right.get(k), k) for k in ("grip", "trigger"))
     if not (0 <= grip <= 1 and 0 <= trigger <= 1):
         raise ValueError("grip/trigger outside [0,1]")
+    stick_y=number(right.get('stick_y',0.),'stick_y')
+    if not -1<=stick_y<=1:raise ValueError('stick_y outside [-1,1]')
+    pitch=right.get('tool_pitch_rad')
+    if pitch is not None:
+        pitch=number(pitch,'tool_pitch_rad')
+        if not -math.pi/2<=pitch<=math.pi/2:raise ValueError('tool pitch outside [-pi/2,pi/2]')
     return InputFrame(seq, number(payload.get("client_time_ms"), "client time"), epoch,
                       reference, mode, visible, valid, position, orientation, grip, trigger,
                       boolean(right.get("precision"), "precision"),
                       boolean(right.get("stop"), "stop"), boolean(right.get("arm"), "arm"),
-                      boolean(right.get("emulated",False), "emulated"))
+                      stick_y,boolean(right.get("emulated",False), "emulated"),pitch)
 
 
 class ClockSync:

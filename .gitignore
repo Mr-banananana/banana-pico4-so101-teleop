@@ -2,6 +2,7 @@ configs/pico-hardware.local.json
 configs/pico-real-calibration.local.json
 configs/pico-control-reference.local.json
 configs/pico-client.local.json
+/banana_so101.json
 artifacts/
 .venv/
 .venv*/
