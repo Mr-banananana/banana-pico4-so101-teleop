@@ -360,9 +360,13 @@ class TeleopController:
             target_R=self.orientation.engage(frame.orientation,frame.seq,frame.precision)
         hand=self._control_point(frame.position)
         trigger=conditioned_trigger(frame.trigger) if self.physical else frame.trigger
+        intent = None
+        if self.physical and (MOTION.stable_input or frame.precision):
+            intent = HandIntent(hand, MOTION, frame.seq, frame.precision,
+                                sample_time_ms=frame.client_time_ms)
         self._anchor = dict(hand=hand.copy(), position=p.copy(),
                             operator_hand=hand.copy(),operator_position=p.copy(),
-                            intent=HandIntent(hand,MOTION,frame.seq,frame.precision) if self.physical and MOTION.stable_input else None,
+                            intent=intent,
                             filtered_hand=hand.copy(),accepted_hand=hand.copy(),
                             hand_velocity=np.zeros(3),hand_acceleration=np.zeros(3),
                             **({} if self.physical else dict(hand_R=Rotation.from_quat(frame.orientation).as_matrix(),tool_R=rotation.copy())),
@@ -480,8 +484,14 @@ class TeleopController:
         alpha=float(np.min(ratios[:5]))
         # Gripper pacing must not abruptly brake the five-joint TCP trajectory.
         command=reference+np.r_[np.full(5,alpha),ratios[5]]*delta
-        lagging=bool(np.max(abs(command[:5]-current[:5])/lead[:5])>MOTION.stationary_tolerance_counts/MOTION.tracking_lead_counts+1e-8)
         self.tracking_limited=bool(braking_limited or min(alpha,ratios[5])<1.-1e-8)
+        # The arm watchdog is for an actively advancing five-joint target. A
+        # gripper-only command must not turn a small, settled arm offset into a
+        # false stall while the independent gripper axis is closing.
+        if np.max(abs(delta[:5]))<=1e-7:
+            self._tracking_wait=None
+            return command
+        lagging=bool(np.max(abs(command[:5]-current[:5])/lead[:5])>MOTION.stationary_tolerance_counts/MOTION.tracking_lead_counts+1e-8)
         # A rate/geometry constraint is not evidence of a stalled motor.
         # Only a material command-feedback error starts the motor watchdog.
         if not lagging:
@@ -709,7 +719,7 @@ class TeleopController:
             target_R=Rotation.from_rotvec(axis*self._pitch_target).as_matrix()@level
             self.requested_rotation=target_R.copy()
         if self.physical and a.get('intent') is not None:
-            hand=a['intent'].update(hand,dt,f.seq)
+            hand=a['intent'].update(hand,dt,f.seq,sample_time_ms=f.client_time_ms)
             a['hand_velocity']=a['intent'].prediction_velocity
             a['hand_acceleration']=a['intent'].acceleration.copy()
         elif self.physical:
@@ -717,7 +727,7 @@ class TeleopController:
             alpha=1.-math.exp(-dt/MOTION.hand_filter_tau)
             a['filtered_hand']+=alpha*(hand-a['filtered_hand'])
             delta=a['filtered_hand']-a['accepted_hand'];distance=np.linalg.norm(delta)
-            deadband=.0015 if f.precision else MOTION.hand_deadband
+            deadband=MOTION.hand_deadband
             if distance>deadband:a['accepted_hand']+=delta*(1.-deadband/distance)
             beta=1.-math.exp(-dt/MOTION.prediction_velocity_tau)
             previous_velocity=a['hand_velocity'].copy()

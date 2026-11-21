@@ -17,7 +17,9 @@ class WorkspaceEntry:
         self.state='waiting';self.message='等待反馈，准备自动进入工作区'
         self.running=False;self.cancelled=False;self.plan=None;self._token=None;self._last_goal_m=None
         self._enable_at=-float('inf');self._failed_raw=None;self._stable=[];self._owns_enable=False
-        self._feedback_progress=0.;self._feedback_progress_at=None;self._feedback_raw=None;self._timeout_s=60.
+        self._feedback_progress=0.;self._feedback_progress_at=None;self._timeout_s=60.
+        self._started=None
+        self._retry_margin=None
         self.block_diagnostics=None
         self._check_kinematics=type(arm.kinematics)(arm.model,site=arm.kinematics.site)
 
@@ -33,18 +35,23 @@ class WorkspaceEntry:
 
     def cancel(self,reason,latch=False):
         self.running=False;self._token=None;self.plan=None;self._stable=[]
+        self._started=None;self._retry_margin=None
         self.cancelled=self.cancelled or latch;self.state='cancelled' if self.cancelled else 'waiting'
         self.message=reason;self.arm.worker.hold();self._owns_enable=False
 
     def resume(self):
         self.cancelled=False;self._failed_raw=None;self.state='waiting'
+        self._started=None;self._retry_margin=None
 
     def _inside(self,p):return bool(np.all(p>=self.low) and np.all(p<=self.high))
 
     def _violation(self,p):return np.maximum(self.arm.work_min-p,0)+np.maximum(p-self.arm.work_max,0)
 
-    def _healthy(self):
-        a=self.arm;w=a.worker;s=w.snapshot()
+    def _ready_error(self,p):
+        return float(np.linalg.norm(p-np.clip(p,self.low,self.high)))
+
+    def _healthy(self,s):
+        a=self.arm
         if getattr(a,'control_reference_error',None):return False
         if a.profile is None or not s or time.monotonic()-s['captured_at']>.1:return False
         if a.confirmed_supply!=a.profile.data['supply_version']:return False
@@ -67,6 +74,7 @@ class WorkspaceEntry:
         if self.running or self._owns_enable:self.arm.worker.hold()
         self._owns_enable=False
         self.running=False;self._token=None;self.state='blocked';self.message=reason
+        self._started=None;self._retry_margin=None
         snap=self.arm.worker.snapshot();self._failed_raw=None if snap is None else tuple(snap['raw'])
         return False
 
@@ -77,14 +85,31 @@ class WorkspaceEntry:
 
     def _guard(self,token,raw):
         a=self.arm;w=a.worker
+        snap=w.snapshot()
         if (token is not self._token or not self.running or self.cancelled or w.fault
                 or not w.enabled or w.thermal_pending or w.hold_epoch!=self._epoch
-                or a.profile is not self._profile or not self._healthy()):return False
-        current=np.asarray(w.snapshot()['raw'])
+                or a.profile is not self._profile or not self._healthy(snap)):return False
+        current=np.asarray(snap['raw'])
         if np.max(abs(raw-current))>self.hard_lead_counts or abs(current[5]-self._gripper_raw)>4:return False
         measured=self._profile.decode(current,require_bounds=False)
         p=self._check_kinematics.fk(measured[:5])[0]
         return bool(np.all(self._violation(p)<=self._initial_violation+.004))
+
+    def _retry_farther_inside(self,p):
+        # Only retry after measurable motion toward the ready box. A blocked
+        # arm with no inward progress must not be driven against a new goal.
+        if (self._retry_margin is not None or self._inside(p)
+                or self._initial_ready_error-self._ready_error(p)<.0005):
+            return False
+        a=self.arm
+        margin=min(self.planned_margin+.015,.10,float(np.min(a.work_max-a.work_min))/2-.001)
+        if margin<self.planned_margin+.005:
+            return False
+        self._retry_margin=margin
+        self.running=False;self._token=None;self.plan=None
+        self.state='waiting';self.message='末端已向内移动但尚未就绪，正在从实际位置规划更靠内的目标'
+        a.worker.hold()
+        return True
 
     def tick(self,now,dt,*,allow=True):
         a=self.arm;w=a.worker
@@ -96,7 +121,8 @@ class WorkspaceEntry:
         if not np.isfinite(dt) or not 0<dt<=.15:
             if self.running or self._owns_enable:self.cancel('控制周期延迟，等待重新规划')
             return False
-        if not self._healthy():
+        snap=w.snapshot()
+        if not self._healthy(snap):
             if self.running or self._owns_enable:self.cancel('反馈或供电条件变化，暂停自动进入')
             self.message='等待标定、匹配供电和新鲜反馈';return False
         if w.thermal_pending:
@@ -109,10 +135,16 @@ class WorkspaceEntry:
                 self._owns_enable=True
             return True
         self._owns_enable=False
-        current=a.read();p=a.kinematics.fk(current[:5])[0]
+        if self._started is not None and now-self._started>self._timeout_s:
+            return self._block('自动进入超过60秒仍未完成，已保持；检查电机跟随和工作区可达性')
+        feedback_raw=np.asarray(snap['raw'],int)
+        current=a.profile.decode(feedback_raw,require_bounds=False)
+        p=a.kinematics.fk(current[:5])[0]
         if not self.running:
-            if self._inside(p):self.state='ready';self.message='已在工作区内，可授权手柄';return False
-            raw_tuple=tuple(w.snapshot()['raw'])
+            if self._inside(p):
+                self._started=None;self._retry_margin=None
+                self.state='ready';self.message='已在工作区内，可授权手柄';return False
+            raw_tuple=tuple(feedback_raw)
             if self.state=='blocked' and self._failed_raw is not None and np.max(abs(np.asarray(raw_tuple)-self._failed_raw))<=32:return False
             if self.state!='stabilizing':
                 if w.active is not None or w.pending is not None:w.hold()
@@ -120,7 +152,7 @@ class WorkspaceEntry:
                 self._before_plan=[];self._before_epoch=w.hold_epoch;self._before_at=now
                 return True
             if w.hold_epoch!=self._before_epoch:return self._block('准备期间执行端已中断')
-            stamp=w.snapshot()['captured_at']
+            stamp=snap['captured_at']
             if not self._before_plan or stamp!=self._before_plan[-1][0]:self._before_plan.append((stamp,np.asarray(raw_tuple)))
             self._before_plan=[v for v in self._before_plan if stamp-v[0]<=.2]
             stable=(len(self._before_plan)>=4 and stamp-self._before_plan[0][0]>=.08
@@ -135,6 +167,8 @@ class WorkspaceEntry:
                 minimum=self.margin+.005
                 margins=([self.entry_margin,(self.entry_margin+minimum)/2,minimum]
                          if self.entry_margin-self.margin>.015 else [self.entry_margin])
+                if self._retry_margin is not None:
+                    margins=[self._retry_margin]
                 last_error=None
                 for candidate in margins:
                     try:
@@ -152,15 +186,17 @@ class WorkspaceEntry:
             self._speed=min(1.0,.9*MOTION.raw_command_rate*a.profile.tick,.12/max(derivative,1e-9))
             self._acc=min(6.,MOTION.joint_acceleration);self._distance=0.;self._velocity=0.
             self._profile=a.profile;self._epoch=w.hold_epoch;self._token=object();self.running=True
-            self._gripper_raw=int(w.snapshot()['raw'][5]);self._grip=float(current[5])
-            self._initial_violation=self._violation(p);self._started=now;self._stable=[];self._last_sample=None
+            self._gripper_raw=int(feedback_raw[5]);self._grip=float(current[5])
+            self._initial_violation=self._violation(p);self._initial_ready_error=self._ready_error(p)
+            if self._started is None:self._started=now
+            self._stable=[];self._last_sample=None;self._endpoint_sent_at=None
+            self._endpoint_raw=self._profile.encode(np.r_[self._path[-1],self._grip])
             self._feedback_progress=0.;self._feedback_progress_at=now
-            self._feedback_raw=np.asarray(w.snapshot()['raw'],int).copy()
             self.state='moving';self.message='正在自动进入最近可达工作区，请等待'
         if w.hold_epoch!=self._epoch:return self._block('执行端中断了进入轨迹，请检查反馈')
-        if now-self._started>self._timeout_s:return self._block('自动进入超过60秒仍未完成，已保持；检查电机跟随和工作区可达性')
         if self.state=='latching':
             if w.holding and w.active is None and w.pending is None and w.latch_request is None:
+                self._started=None;self._retry_margin=None
                 self.running=False;self._token=None;self.state='ready';self.message='已自动进入工作区，可授权手柄';return False
             return True
         reference=self._point(self._distance)
@@ -174,16 +210,16 @@ class WorkspaceEntry:
         distances=np.einsum('ij,ij->i',projected-current[None,:5],projected-current[None,:5])
         nearest=int(np.argmin(distances))
         measured_progress=float(self._arc[nearest]+fraction[nearest]*(self._arc[nearest+1]-self._arc[nearest]))
-        progress_advanced=measured_progress>self._feedback_progress+.0001
-        if progress_advanced:
+        if measured_progress>=self._feedback_progress+self._profile.tick:
             self._feedback_progress=measured_progress;self._feedback_progress_at=now
-        feedback_raw=np.asarray(w.snapshot()['raw'],int)
-        encoder_changed=self._feedback_raw is not None and np.any(feedback_raw!=self._feedback_raw)
-        if encoder_changed:
-            self._feedback_raw=feedback_raw.copy();self._feedback_progress_at=now
-        if (self._distance>.01 and self._total-self._feedback_progress>.01
-                and self._feedback_progress_at is not None and now-self._feedback_progress_at>5.):
-            return self._block('自动进入目标已下发，但编码器连续5秒无变化；停止前电机快照已保存')
+        stalled_for=now-self._feedback_progress_at
+        if self._distance>=self._total-1e-6 and np.array_equal(w.last_sent,self._endpoint_raw):
+            if self._endpoint_sent_at is None:self._endpoint_sent_at=now
+            if now-self._endpoint_sent_at>=.8 and stalled_for>=.8 and self._retry_farther_inside(p):
+                return True
+        if stalled_for>5.:
+            if self._retry_farther_inside(p):return True
+            return self._block('自动进入目标已下发，但反馈连续5秒未沿路径推进；停止前电机快照已保存')
         room=max(0.,self.lead_counts*a.profile.tick-float(np.max(abs(reference-current[:5]))))
         brake=lambda r:np.sqrt((self._acc*dt)**2+2*self._acc*max(0.,r))-self._acc*dt
         cap=min(self._speed,brake(self._total-self._distance),brake(room))
@@ -192,16 +228,16 @@ class WorkspaceEntry:
         command=np.r_[self._point(self._distance),self._grip];raw=self._profile.encode(command)
         target_p=a.kinematics.fk(self._profile.decode(raw)[:5])[0]
         if np.any(self._violation(target_p)>self._initial_violation+.0015):return self._block('量化目标超出预检进入路径')
-        if np.max(abs(raw-np.asarray(w.snapshot()['raw'])))>self.hard_lead_counts:return self._block('进入目标领先反馈过多')
+        if np.max(abs(raw-feedback_raw))>self.hard_lead_counts:return self._block('进入目标领先反馈过多')
         token=self._token;guard=lambda:self._guard(token,raw)
         if self._distance>=self._total-1e-6 and self._inside(p):
-            stamp=w.snapshot()['captured_at']
+            stamp=snap['captured_at']
             if stamp!=self._last_sample:
-                self._stable.append((stamp,np.asarray(w.snapshot()['raw']).copy()));self._last_sample=stamp
+                self._stable.append((stamp,feedback_raw.copy()));self._last_sample=stamp
             self._stable=[v for v in self._stable if stamp-v[0]<=.25]
             if (len(self._stable)>=4 and stamp-self._stable[0][0]>=.16
                     and np.max(np.ptp([v[1] for v in self._stable],axis=0))<=2
-                    and np.max(abs(raw-np.asarray(w.snapshot()['raw'])))<=self.settle_counts
+                    and np.max(abs(raw-feedback_raw))<=self.settle_counts
                     and w.last_sent is not None and np.array_equal(w.last_sent,raw)):
                 w.latch_hold(raw,guard,tolerance_counts=self.settle_counts);self.state='latching';return True
         w.submit(raw,time.monotonic()+.08,guard)

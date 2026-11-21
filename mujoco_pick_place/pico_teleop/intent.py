@@ -6,53 +6,98 @@ from scipy.spatial.transform import Rotation
 
 
 class HandIntent:
-    def __init__(self,position,motion,sequence,precision=False):
+    def __init__(self,position,motion,sequence,precision=False,*,sample_time_ms=None):
         self.motion=motion;self.last_sequence=sequence;self.elapsed=0.
+        self.last_sample_time_ms = sample_time_ms
+        self.last_sample_elapsed = 0.
         self.accepted=np.asarray(position,float).copy();self.filtered=self.accepted.copy()
         self.trusted=self.accepted.copy();self.rest_reference=self.accepted.copy()
-        self.rest=True;self.radius=.0015 if precision else .003
-        self.deadband=.0015 if precision else motion.hand_deadband
+        self.precision = precision
+        self.rest=True;self.radius=.00075 if precision else .003
+        self.deadband=.00035 if precision else motion.hand_deadband
+        self.rest_span = .0008 if precision else .003
+        self.rest_speed = .0015 if precision else .005
+        self.wake_offset = None
         self.velocity=np.zeros(3);self.acceleration=np.zeros(3)
-        self.pending=[];self.jump_direction=None;self.rejected_pulses=0;self.confidence=0
-        self.history=deque()
+        self.pending = deque(maxlen=4)
+        self.rejected_pulses = 0
+        self.confidence = 0
+        self.history = deque()
 
-    def _pose(self,raw,dt,new):
-        if not new:return not self.pending
+    def _pose(self, raw, sample_dt):
         if self.pending:
-            if np.linalg.norm(raw-self.trusted)<=.003:
-                self.pending=[];self.jump_direction=None
-            else:
-                self.pending.append(raw.copy());self.pending=self.pending[-4:]
-                if len(self.pending)<4:return False
-                points=np.asarray(self.pending);steps=np.diff(points,axis=0)
-                stable=np.linalg.norm(np.ptp(points,axis=0))<=.003
-                projected=steps@self.jump_direction
-                continuing=np.all(projected>=.001)&np.all(projected>=.5*np.linalg.norm(steps,axis=1))
-                if not (stable or continuing):return False
-                self.pending=[];self.jump_direction=None
-        elif np.linalg.norm(raw-self.trusted)>max(.012,.6*dt):
-            jump=raw-self.trusted;self.jump_direction=jump/np.linalg.norm(jump)
-            self.pending=[raw.copy()];self.rejected_pulses+=1
+            if np.linalg.norm(raw - self.trusted) > .003:
+                self.pending.append((raw.copy(), sample_dt))
+                if len(self.pending) < self.pending.maxlen:
+                    return False
+                points = np.array([point for point, _ in self.pending])
+                intervals = np.array([interval for _, interval in self.pending])[1:]
+                lengths = np.linalg.norm(np.diff(points, axis=0), axis=1)
+                stable = np.linalg.norm(np.ptp(points, axis=0)) <= .003
+                # Confirm from recent local steps because the first jump
+                # is untrusted and may be followed by a real turn.
+                continuing = (
+                    np.all(lengths <= np.maximum(.003, 1.6 * intervals))
+                    and np.linalg.norm(points[-1] - points[0]) >= .5 * lengths.sum()
+                )
+                if not (stable or continuing):
+                    return False
+            self.pending.clear()
+        elif np.linalg.norm(raw - self.trusted) > max(.012, .6 * sample_dt):
+            self.pending.append((raw.copy(), sample_dt))
+            self.rejected_pulses += 1
             return False
-        self.trusted=raw.copy()
+        self.trusted = raw.copy()
         return True
 
     def _quiet(self):
         self.velocity[:]=0;self.acceleration[:]=0;self.confidence=0
 
-    def update(self,position,dt,sequence):
+    def update(self,position,dt,sequence,*,sample_time_ms=None):
         raw=np.asarray(position,float)
         if raw.shape!=(3,) or not np.isfinite(raw).all() or not math.isfinite(dt) or not 0<dt<=.15:
             raise ValueError('invalid hand intent sample')
         if sequence<self.last_sequence:raise ValueError('old hand intent sequence')
         new=sequence!=self.last_sequence;self.last_sequence=sequence;self.elapsed+=dt
-        if not self._pose(raw,dt,new):
+        if new:
+            sample_dt = self.elapsed - self.last_sample_elapsed
+            if sample_time_ms is not None and self.last_sample_time_ms is not None:
+                measured_dt = (sample_time_ms - self.last_sample_time_ms) / 1000.
+                if measured_dt > 0:
+                    sample_dt = measured_dt
+            self.last_sample_elapsed = self.elapsed
+            self.last_sample_time_ms = sample_time_ms
+            measured_step = raw - self.trusted
+            trusted = self._pose(raw, min(sample_dt, .05))
+            if trusted:
+                # Filtered velocity can keep pointing forward for a control
+                # tick after the operator turns back. Drop that feedforward.
+                distance = np.linalg.norm(measured_step)
+                if distance > self.deadband and np.dot(measured_step, self.velocity) < 0:
+                    self._quiet()
+        else:
+            trusted = not self.pending
+            if self.last_sample_time_ms is None:
+                self.last_sample_time_ms = sample_time_ms
+        if not trusted:
+            self.wake_offset = None
             self._quiet();self.filtered=self.accepted.copy();self.history.clear()
             return self.accepted.copy()
         raw=self.trusted
         if self.rest:
-            if np.linalg.norm(raw-self.rest_reference)<=self.radius:
+            offset = raw - self.rest_reference
+            distance = np.linalg.norm(offset)
+            if distance <= self.radius:
+                self.wake_offset = None
                 self._quiet();return self.accepted.copy()
+            if self.precision:
+                if not new:
+                    return self.accepted.copy()
+                previous = self.wake_offset
+                self.wake_offset = offset
+                if previous is None or np.dot(previous, offset) < .5 * np.linalg.norm(previous) * distance:
+                    return self.accepted.copy()
+                self.wake_offset = None
             self.rest=False;self.history.clear()
         previous=self.accepted.copy();previous_velocity=self.velocity.copy()
         alpha=1-math.exp(-dt/self.motion.hand_filter_tau)
@@ -69,7 +114,7 @@ class HandIntent:
         if len(self.history)>=4 and self.history[-1][0]-self.history[0][0]>=.15:
             times=np.asarray([p[0] for p in self.history]);times-=times.mean()
             points=np.asarray([p[1] for p in self.history]);slope=times@points/max(1e-12,times@times)
-            if np.linalg.norm(np.ptp(points,axis=0))<=.003 and np.linalg.norm(slope)<=.005:
+            if np.linalg.norm(np.ptp(points,axis=0))<=self.rest_span and np.linalg.norm(slope)<=self.rest_speed:
                 self.rest=True;self.rest_reference=np.median(points,axis=0)
                 self.filtered=self.accepted.copy();self._quiet()
         return self.accepted.copy()

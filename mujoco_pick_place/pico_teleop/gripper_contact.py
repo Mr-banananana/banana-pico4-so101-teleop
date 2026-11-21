@@ -13,7 +13,9 @@ class GripperContactGuard:
     plateau_seconds=.100
     minimum_samples=3
     closing_error_counts=8
-    contact_lead_counts=4
+    # A modest extra position preload after contact is detected. This is an
+    # encoder-count setting, not a calibrated force value.
+    contact_lead_counts=8
     opening_release_counts=8
 
     def __init__(self):
